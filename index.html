@@ -18,26 +18,6 @@
         h1 { font-size: 2rem; color: #1a1a2e; margin-bottom: 8px; }
         .subtitle { color: #666; font-size: 1rem; }
 
-        .settings-section {
-            background: white;
-            border-radius: 12px;
-            padding: 20px 30px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            margin-bottom: 20px;
-        }
-        .api-key-group { display: flex; gap: 12px; align-items: center; }
-        .api-key-group label { font-weight: 600; white-space: nowrap; }
-        .api-key-group input {
-            flex: 1;
-            padding: 10px 14px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 0.875rem;
-        }
-        .api-key-group input:focus { outline: none; border-color: #4a6cf7; }
-        .api-status { font-size: 0.75rem; color: #666; margin-top: 8px; }
-        .api-status.valid { color: #2e7d32; }
-
         .upload-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -268,11 +248,13 @@
         .detail-section li::before { content: '•'; position: absolute; left: 0; color: #4a6cf7; }
         .detail-section .concerns li::before { color: #f57c00; }
 
+        .footer { text-align: center; margin-top: 40px; font-size: 0.75rem; color: #999; }
+        .footer a { color: #4a6cf7; text-decoration: none; }
+
         @media (max-width: 768px) {
             .upload-grid { grid-template-columns: 1fr; }
             .results-summary { grid-template-columns: repeat(2, 1fr); }
             .results-table { display: block; overflow-x: auto; }
-            .api-key-group { flex-direction: column; align-items: stretch; }
         }
     </style>
 </head>
@@ -282,14 +264,6 @@
             <h1>応募者評価ツール</h1>
             <p class="subtitle">募集要項と応募書類をアップロードして、マッチ度を自動評価</p>
         </header>
-
-        <div class="settings-section">
-            <div class="api-key-group">
-                <label for="apiKey">Anthropic API Key:</label>
-                <input type="password" id="apiKey" placeholder="sk-ant-api..." />
-            </div>
-            <p class="api-status" id="apiStatus">APIキーを入力してください</p>
-        </div>
 
         <div class="upload-grid">
             <div class="upload-section job-posting">
@@ -392,13 +366,15 @@
                 <div id="modalBody"></div>
             </div>
         </div>
+
+        <footer class="footer">
+            Powered by <a href="https://www.anthropic.com/" target="_blank">Claude AI</a>
+        </footer>
     </div>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-        const apiKeyInput = document.getElementById('apiKey');
-        const apiStatus = document.getElementById('apiStatus');
         const jobDropZone = document.getElementById('jobDropZone');
         const jobFileInput = document.getElementById('jobFileInput');
         const jobFileList = document.getElementById('jobFileList');
@@ -418,28 +394,6 @@
         let jobFile = null;
         let applicantFiles = [];
         let allResults = [];
-        let jobRequirements = '';
-
-        // Load saved API key
-        const savedKey = localStorage.getItem('anthropic_api_key');
-        if (savedKey) {
-            apiKeyInput.value = savedKey;
-            apiStatus.textContent = 'APIキーを読み込みました';
-            apiStatus.classList.add('valid');
-        }
-
-        apiKeyInput.addEventListener('input', () => {
-            const key = apiKeyInput.value.trim();
-            if (key.startsWith('sk-ant-')) {
-                localStorage.setItem('anthropic_api_key', key);
-                apiStatus.textContent = 'APIキーを保存しました';
-                apiStatus.classList.add('valid');
-            } else {
-                apiStatus.textContent = 'APIキーを入力してください';
-                apiStatus.classList.remove('valid');
-            }
-            updateButtonState();
-        });
 
         // Job posting drag & drop
         setupDropZone(jobDropZone, jobFileInput, (files) => {
@@ -447,15 +401,15 @@
                 jobFile = files[0];
                 updateJobFileList();
             }
-        }, false);
+        });
 
         // Applicant files drag & drop
         setupDropZone(applicantDropZone, applicantFileInput, (files) => {
             applicantFiles = [...applicantFiles, ...files];
             updateApplicantFileList();
-        }, true);
+        });
 
-        function setupDropZone(dropZone, fileInput, onFiles, multiple) {
+        function setupDropZone(dropZone, fileInput, onFiles) {
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
                 dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
             });
@@ -515,15 +469,12 @@
         }
 
         function updateButtonState() {
-            const hasKey = apiKeyInput.value.trim().startsWith('sk-ant-');
             const hasJob = jobFile !== null;
             const hasApplicants = applicantFiles.length > 0;
 
-            evaluateBtn.disabled = !(hasKey && hasJob && hasApplicants);
+            evaluateBtn.disabled = !(hasJob && hasApplicants);
 
-            if (!hasKey) {
-                btnHint.textContent = 'APIキーを入力してください';
-            } else if (!hasJob) {
+            if (!hasJob) {
                 btnHint.textContent = '募集要項をアップロードしてください';
             } else if (!hasApplicants) {
                 btnHint.textContent = '応募者書類をアップロードしてください';
@@ -544,102 +495,35 @@
             return text;
         }
 
-        async function evaluateWithClaude(jobText, resumeText, apiKey) {
-            const prompt = `あなたは採用担当者のアシスタントです。
-募集要項と応募者の書類を比較し、この応募者が募集要件にマッチしているかを評価してください。
-
-【募集要項】
-${jobText}
-
-【応募者の書類（履歴書・職務経歴書）】
-${resumeText}
-
-【評価ポイント】
-1. 必須スキル・経験のマッチ度
-2. 歓迎スキル・経験の有無
-3. 職種・業界経験の関連性
-4. 応募者の強みと募集ポジションの適合性
-
-【出力形式】
-以下のJSON形式で出力してください。他の文章は不要です。
-{
-  "name": "応募者名（分からなければ「不明」）",
-  "recommendation": "A / B / C / D",
-  "score": 1-100の数値,
-  "match_rate": 1-100の数値（募集要件とのマッチ度）,
-  "experience_years": "関連経験年数（推定）",
-  "matching_skills": ["マッチしているスキル1", "スキル2"],
-  "missing_skills": ["不足しているスキル1", "スキル2"],
-  "qualifications": ["保有資格1", "資格2"],
-  "strengths": ["この募集に対する強み1", "強み2"],
-  "concerns": ["懸念点1", "懸念点2"],
-  "summary": "50文字以内の一言評価（募集要件との適合性を中心に）"
-}
-
-【評価基準】
-- A（強くおすすめ）: マッチ度80%以上、必須要件をほぼ満たす
-- B（面談推奨）: マッチ度60-79%、主要な要件を満たす
-- C（要検討）: マッチ度40-59%、一部要件を満たす
-- D（見送り推奨）: マッチ度40%未満、要件との乖離が大きい`;
-
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
+        async function evaluateApplicant(jobText, resumeText) {
+            const response = await fetch('/api/evaluate', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerous-direct-browser-access': 'true'
-                },
-                body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
-                    max_tokens: 1024,
-                    messages: [{ role: 'user', content: prompt }]
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jobText, resumeText })
             });
 
             if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.error?.message || 'API Error');
+                throw new Error(error.error || 'API Error');
             }
 
-            const data = await response.json();
-            const text = data.content[0].text;
-
-            const start = text.indexOf('{');
-            const end = text.lastIndexOf('}') + 1;
-            if (start !== -1 && end > start) {
-                return JSON.parse(text.slice(start, end));
-            }
-            throw new Error('Invalid response format');
+            return response.json();
         }
 
-        async function summarizeJobPosting(jobText, apiKey) {
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
+        async function summarizeJobPosting(jobText) {
+            const response = await fetch('/api/summarize', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerous-direct-browser-access': 'true'
-                },
-                body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
-                    max_tokens: 256,
-                    messages: [{
-                        role: 'user',
-                        content: `以下の募集要項を1行（50文字以内）で要約してください。職種名と主な要件を含めてください。\n\n${jobText}`
-                    }]
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jobText })
             });
 
             if (!response.ok) return '募集要項';
             const data = await response.json();
-            return data.content[0].text.trim();
+            return data.summary;
         }
 
         evaluateBtn.addEventListener('click', async () => {
-            const apiKey = apiKeyInput.value.trim();
-            if (!apiKey || !jobFile || applicantFiles.length === 0) return;
+            if (!jobFile || applicantFiles.length === 0) return;
 
             evaluateBtn.classList.add('loading');
             evaluateBtn.disabled = true;
@@ -657,12 +541,10 @@ ${resumeText}
                     throw new Error('募集要項PDFからテキストを抽出できませんでした');
                 }
 
-                jobRequirements = jobText;
-
                 // Summarize job posting
                 progressText.textContent = '募集要項を分析中...';
                 progressFill.style.width = '10%';
-                const jobSummaryText = await summarizeJobPosting(jobText, apiKey);
+                const jobSummaryText = await summarizeJobPosting(jobText);
                 document.getElementById('jobSummaryText').textContent = jobSummaryText;
 
                 // Evaluate each applicant
@@ -679,7 +561,7 @@ ${resumeText}
                             continue;
                         }
 
-                        const result = await evaluateWithClaude(jobText, resumeText, apiKey);
+                        const result = await evaluateApplicant(jobText, resumeText);
                         result.filename = file.name;
                         allResults.push(result);
                     } catch (error) {
