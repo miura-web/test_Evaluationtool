@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>応募者評価ツール</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -483,15 +484,58 @@
             }
         }
 
-        async function extractTextFromPDF(file) {
+        async function extractTextFromPDF(file, useOCR = false) {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
             let text = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                text += content.items.map(item => item.str).join(' ') + '\n';
+
+            // まず通常のテキスト抽出を試みる
+            if (!useOCR) {
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    text += content.items.map(item => item.str).join(' ') + '\n';
+                }
+
+                // テキストが十分にあれば返す
+                if (text.trim().length > 50) {
+                    return text;
+                }
             }
+
+            // テキストがない/少ない場合はOCRを使用
+            console.log('OCRを使用してテキストを抽出します...');
+            text = '';
+
+            for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) { // 最大5ページまで
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale: 2.0 });
+
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+                const imageData = canvas.toDataURL('image/png');
+
+                try {
+                    const result = await Tesseract.recognize(imageData, 'jpn+eng', {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                const pageProgress = ((i - 1) / Math.min(pdf.numPages, 5)) * 100;
+                                const ocrProgress = m.progress * (100 / Math.min(pdf.numPages, 5));
+                                progressText.textContent = `OCR処理中... ページ ${i}/${Math.min(pdf.numPages, 5)}`;
+                            }
+                        }
+                    });
+                    text += result.data.text + '\n';
+                } catch (ocrError) {
+                    console.error('OCRエラー:', ocrError);
+                }
+            }
+
             return text;
         }
 
@@ -535,10 +579,15 @@
                 // Extract job posting text
                 progressText.textContent = '募集要項を読み込み中...';
                 progressFill.style.width = '5%';
-                const jobText = await extractTextFromPDF(jobFile);
+                let jobText = await extractTextFromPDF(jobFile);
 
-                if (!jobText.trim()) {
-                    throw new Error('募集要項PDFからテキストを抽出できませんでした');
+                if (!jobText.trim() || jobText.trim().length < 50) {
+                    progressText.textContent = '募集要項をOCR処理中...';
+                    jobText = await extractTextFromPDF(jobFile, true);
+                }
+
+                if (!jobText.trim() || jobText.trim().length < 30) {
+                    throw new Error('募集要項PDFからテキストを抽出できませんでした（OCRも失敗）');
                 }
 
                 // Summarize job posting
@@ -555,9 +604,13 @@
                     progressFill.style.width = `${10 + ((i + 0.5) / total) * 85}%`;
 
                     try {
-                        const resumeText = await extractTextFromPDF(file);
-                        if (!resumeText.trim()) {
-                            allResults.push({ filename: file.name, error: 'PDFからテキストを抽出できませんでした' });
+                        let resumeText = await extractTextFromPDF(file);
+                        if (!resumeText.trim() || resumeText.trim().length < 50) {
+                            progressText.textContent = `${file.name} をOCR処理中... (${i + 1}/${total})`;
+                            resumeText = await extractTextFromPDF(file, true);
+                        }
+                        if (!resumeText.trim() || resumeText.trim().length < 30) {
+                            allResults.push({ filename: file.name, error: 'PDFからテキストを抽出できませんでした（OCRも失敗）' });
                             continue;
                         }
 
