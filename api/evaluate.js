@@ -53,7 +53,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { jobText, resumeText, criteria } = req.body;
+    const { jobText, resumeText, criteria, videoFrames, videoTranscript } = req.body;
 
     if (!jobText || !resumeText) {
       return res.status(400).json({ error: 'Missing jobText or resumeText' });
@@ -83,6 +83,35 @@ module.exports = async function handler(req, res) {
       evaluationPoints = `1. 必須スキル・経験のマッチ度\n2. 歓迎スキル・経験の有無\n3. 職種・業界経験の関連性\n4. 応募者の強みと募集ポジションの適合性`;
     }
 
+    const hasVideo = Array.isArray(videoFrames) && videoFrames.length > 0;
+    const trimmedTranscript = videoTranscript ? truncateText(videoTranscript, 5000) : '';
+
+    const videoSection = hasVideo ? `
+
+【面接動画の情報】
+${trimmedTranscript ? `[書き起こし]\n${trimmedTranscript}\n` : ''}
+[動画フレーム]
+以下の画像は面接/自己PR動画から等間隔で抽出したフレームです。
+
+【動画評価ポイント】
+動画から以下の点を追加で評価してください:
+1. 外見・身だしなみの適切さ（清潔感、TPO）
+2. 表情・態度（明るさ、誠実さ、自信）
+3. コミュニケーション能力（話し方の明瞭さ、論理性）
+4. 志望動機・自己PRの内容と説得力
+5. 全体的な印象・ポテンシャル` : '';
+
+    const videoOutputSchema = hasVideo ? `,
+  "video_evaluation": {
+    "appearance_score": 1-5の数値（身だしなみ・外見）,
+    "communication_score": 1-5の数値（コミュニケーション力）,
+    "attitude_score": 1-5の数値（態度・姿勢）,
+    "content_score": 1-5の数値（発言内容の質）,
+    "overall_impression": "動画からの全体的な印象（100文字以内）",
+    "video_strengths": ["動画で確認できた強み1", "強み2"],
+    "video_concerns": ["動画での懸念点1", "懸念点2"]
+  }` : '';
+
     const prompt = `あなたは採用担当者のアシスタントです。
 募集要項と応募者の書類を比較し、この応募者が募集要件にマッチしているかを評価してください。
 
@@ -97,6 +126,7 @@ ${evaluationPoints}
 
 上記の評価ポイントの重要度に応じて、重み付けしてスコアとマッチ度を算出してください。
 「最重視」の項目は評価への影響が最も大きく、「参考程度」の項目は軽微な影響としてください。
+${videoSection}
 
 【出力形式】
 以下のJSON形式で出力してください。他の文章は不要です。
@@ -111,7 +141,7 @@ ${evaluationPoints}
   "qualifications": ["保有資格1", "資格2"],
   "strengths": ["この募集に対する強み1", "強み2"],
   "concerns": ["懸念点1", "懸念点2"],
-  "summary": "50文字以内の一言評価（募集要件との適合性を中心に）"
+  "summary": "50文字以内の一言評価（募集要件との適合性を中心に）"${videoOutputSchema}
 }
 
 【評価基準】
@@ -120,10 +150,26 @@ ${evaluationPoints}
 - C（要検討）: マッチ度40-59%、一部要件を満たす
 - D（見送り推奨）: マッチ度40%未満、要件との乖離が大きい`;
 
+    // Build content array (text + optional images)
+    const content = [{ type: 'text', text: prompt }];
+    if (hasVideo) {
+      const frames = videoFrames.slice(0, 20);
+      for (const frame of frames) {
+        const ts = frame.timestamp || 0;
+        const min = Math.floor(ts / 60);
+        const sec = Math.floor(ts % 60);
+        content.push({ type: 'text', text: `[${min}:${String(sec).padStart(2, '0')}]` });
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: frame.data }
+        });
+      }
+    }
+
     const data = await callAnthropicWithRetry(apiKey, {
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }]
+      max_tokens: hasVideo ? 2048 : 1024,
+      messages: [{ role: 'user', content: hasVideo ? content : prompt }]
     });
 
     const text = data.content[0].text;

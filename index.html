@@ -53,6 +53,7 @@
         }
         .upload-section.job-posting { border-top: 3px solid #4a6cf7; }
         .upload-section.applicants { border-top: 3px solid #2e7d32; }
+        .upload-section.video-upload { border-top: 3px solid #9c27b0; }
 
         .drop-zone {
             border: 2px dashed #ccd;
@@ -315,10 +316,155 @@
         }
         .criteria-reset-btn:hover { border-color: #999; color: #333; }
 
+        /* Video upload and evaluation styles */
+        .video-progress {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f8f5ff;
+            border-radius: 8px;
+            border-left: 3px solid #9c27b0;
+        }
+        .video-progress .phase-label {
+            font-size: 0.8rem;
+            color: #9c27b0;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .video-progress .sub-progress-bar {
+            height: 4px;
+            background: #e0d4f0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+        .video-progress .sub-progress-fill {
+            height: 100%;
+            background: #9c27b0;
+            transition: width 0.3s;
+        }
+        .video-progress .sub-progress-text {
+            font-size: 0.7rem;
+            color: #999;
+            text-align: right;
+        }
+
+        .transcript-area textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        .transcript-area textarea:focus {
+            border-color: #9c27b0;
+        }
+
+        .transcript-mode {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
+            font-size: 0.85rem;
+            color: #555;
+        }
+        .transcript-mode label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+        }
+        .transcript-mode input[type="radio"] {
+            accent-color: #9c27b0;
+        }
+
+        .video-badge {
+            display: inline-block;
+            font-size: 1.1rem;
+            vertical-align: middle;
+        }
+
+        .video-eval-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: #faf5ff;
+            border-radius: 10px;
+            border: 1px solid #e8d5f5;
+        }
+        .video-eval-section h3 {
+            font-size: 0.95rem;
+            color: #9c27b0;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .video-eval-section .inline-scores {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .video-eval-section .inline-scores .score-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: white;
+            border-radius: 16px;
+            font-size: 0.8rem;
+            border: 1px solid #e8d5f5;
+        }
+        .video-eval-section .inline-scores .score-item .score-val {
+            font-weight: 700;
+            color: #9c27b0;
+        }
+
+        .video-score-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .video-score-item {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid #e8d5f5;
+        }
+        .video-score-item .vs-label {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        .video-score-item .vs-score-bar {
+            height: 6px;
+            background: #e0d4f0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+        .video-score-item .vs-score-fill {
+            height: 100%;
+            background: #9c27b0;
+            border-radius: 3px;
+        }
+        .video-score-item .vs-score-value {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #9c27b0;
+            text-align: right;
+        }
+
         @media (max-width: 768px) {
             .upload-grid { grid-template-columns: 1fr; }
             .results-summary { grid-template-columns: repeat(2, 1fr); }
             .results-table { display: block; overflow-x: auto; }
+            .video-score-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -366,6 +512,34 @@
                     </label>
                 </div>
                 <div id="applicantFileList" class="file-list"></div>
+            </div>
+        </div>
+
+        <div class="upload-section video-upload" style="margin-bottom: 20px;">
+            <h2><span class="step" style="background:#9c27b0">3</span>面接動画（任意）<span style="font-size:0.75rem;color:#999;font-weight:normal;margin-left:8px">オプション</span></h2>
+            <p style="font-size:0.8rem;color:#666;margin-bottom:16px">応募者の自己PR動画や面接録画を追加すると、映像と音声も含めて総合評価します</p>
+            <div id="videoDropZone" class="drop-zone">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                <p>面接・自己PR動画</p>
+                <p class="small">MP4, WebM対応</p>
+                <label class="file-label" style="background:#9c27b0">
+                    動画を選択
+                    <input type="file" id="videoFileInput" multiple accept="video/mp4,video/webm" hidden>
+                </label>
+            </div>
+            <div id="videoFileList" class="file-list"></div>
+            <div id="transcriptSection" style="display:none;margin-top:16px;">
+                <div class="transcript-mode">
+                    <label><input type="radio" name="transcriptMode" value="auto" checked onchange="updateTranscriptMode()"> 自動書き起こし（ブラウザ内AI）</label>
+                    <label style="margin-left:16px"><input type="radio" name="transcriptMode" value="manual" onchange="updateTranscriptMode()"> 手動入力</label>
+                </div>
+                <div id="manualTranscriptArea" class="transcript-area" style="display:none;margin-top:12px">
+                    <textarea id="manualTranscript" placeholder="面接の書き起こしテキストを貼り付けてください..." rows="5"></textarea>
+                </div>
+                <p id="whisperStatus" style="font-size:0.75rem;color:#999;margin-top:8px"></p>
             </div>
         </div>
 
@@ -438,6 +612,7 @@
                 <thead>
                     <tr>
                         <th>評価</th>
+                        <th>動画</th>
                         <th>スコア</th>
                         <th>氏名</th>
                         <th>マッチ度</th>
@@ -595,6 +770,7 @@
         let jobFile = null;
         let applicantFiles = [];
         let allResults = [];
+        let videoFiles = []; // array of { file, applicantIndex }
 
         // Job posting drag & drop
         setupDropZone(jobDropZone, jobFileInput, (files) => {
@@ -625,6 +801,84 @@
                 onFiles(files);
             });
             fileInput.addEventListener('change', e => onFiles([...e.target.files]));
+        }
+
+        // Video drop zone setup (separate from PDF drop zones)
+        (function setupVideoDropZone() {
+            const videoDropZone = document.getElementById('videoDropZone');
+            const videoFileInput = document.getElementById('videoFileInput');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                videoDropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+            });
+            ['dragenter', 'dragover'].forEach(eventName => {
+                videoDropZone.addEventListener(eventName, () => videoDropZone.classList.add('drag-over'), false);
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                videoDropZone.addEventListener(eventName, () => videoDropZone.classList.remove('drag-over'), false);
+            });
+            videoDropZone.addEventListener('drop', e => {
+                const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('video/'));
+                addVideoFiles(files);
+            });
+            videoFileInput.addEventListener('change', e => {
+                addVideoFiles([...e.target.files]);
+            });
+        })();
+
+        function addVideoFiles(files) {
+            const videoDropZone = document.getElementById('videoDropZone');
+            files.forEach(f => {
+                videoFiles.push({ file: f, applicantIndex: videoFiles.length });
+            });
+            if (videoFiles.length > 0) {
+                videoDropZone.classList.add('has-file');
+            }
+            updateVideoFileList();
+            updateTranscriptSectionVisibility();
+        }
+
+        function updateVideoFileList() {
+            const videoFileListEl = document.getElementById('videoFileList');
+            const videoDropZone = document.getElementById('videoDropZone');
+            if (videoFiles.length > 0) {
+                videoDropZone.classList.add('has-file');
+            } else {
+                videoDropZone.classList.remove('has-file');
+            }
+            videoFileListEl.innerHTML = videoFiles.map((vf, index) => `
+                <div class="file-item" style="background:#f5f0fa">
+                    <span class="file-name">&#127909; ${vf.file.name} (${(vf.file.size / (1024 * 1024)).toFixed(1)}MB)</span>
+                    <button class="remove-btn" onclick="removeVideoFile(${index})">×</button>
+                </div>
+            `).join('');
+        }
+
+        function removeVideoFile(index) {
+            videoFiles.splice(index, 1);
+            updateVideoFileList();
+            updateTranscriptSectionVisibility();
+            if (videoFiles.length === 0) {
+                document.getElementById('videoDropZone').classList.remove('has-file');
+            }
+        }
+
+        function updateTranscriptSectionVisibility() {
+            const section = document.getElementById('transcriptSection');
+            section.style.display = videoFiles.length > 0 ? 'block' : 'none';
+        }
+
+        function updateTranscriptMode() {
+            const mode = document.querySelector('input[name="transcriptMode"]:checked').value;
+            const manualArea = document.getElementById('manualTranscriptArea');
+            const whisperStatus = document.getElementById('whisperStatus');
+            if (mode === 'manual') {
+                manualArea.style.display = 'block';
+                whisperStatus.textContent = '';
+            } else {
+                manualArea.style.display = 'none';
+                whisperStatus.textContent = '評価開始時に自動で書き起こしを行います';
+            }
         }
 
         function updateJobFileList() {
@@ -680,7 +934,8 @@
             } else if (!hasApplicants) {
                 btnHint.textContent = '応募者書類をアップロードしてください';
             } else {
-                btnHint.textContent = `${applicantFiles.length}名の応募者を評価します`;
+                const videoNote = videoFiles.length > 0 ? `（動画${videoFiles.length}件含む）` : '';
+                btnHint.textContent = `${applicantFiles.length}名の応募者を評価します${videoNote}`;
             }
         }
 
@@ -743,13 +998,64 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        async function evaluateApplicant(jobText, resumeText, retries = 3) {
+        async function extractFramesFromVideo(videoFile, maxFrames = 20) {
+            return new Promise((resolve, reject) => {
+                const video = document.createElement('video');
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                video.muted = true;
+                video.preload = 'auto';
+                const url = URL.createObjectURL(videoFile);
+                video.src = url;
+
+                video.onloadedmetadata = async () => {
+                    const duration = video.duration;
+                    let interval;
+                    if (duration <= 60) interval = 5;
+                    else if (duration <= 300) interval = 15;
+                    else if (duration <= 900) interval = 30;
+                    else if (duration <= 1800) interval = 60;
+                    else interval = 90;
+
+                    let timestamps = [];
+                    for (let t = 0; t < duration; t += interval) timestamps.push(t);
+                    if (timestamps.length > maxFrames) {
+                        const step = Math.floor(timestamps.length / maxFrames);
+                        timestamps = timestamps.filter((_, i) => i % step === 0).slice(0, maxFrames);
+                    }
+
+                    const maxDim = 1092;
+                    const scale = Math.min(maxDim / video.videoWidth, maxDim / video.videoHeight, 1);
+                    canvas.width = Math.round(video.videoWidth * scale);
+                    canvas.height = Math.round(video.videoHeight * scale);
+
+                    const frames = [];
+                    for (const t of timestamps) {
+                        video.currentTime = t;
+                        await new Promise(r => { video.onseeked = r; });
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        frames.push({ timestamp: t, data: dataUrl.split(',')[1] });
+                    }
+                    URL.revokeObjectURL(url);
+                    resolve(frames);
+                };
+                video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('動画を読み込めませんでした')); };
+            });
+        }
+
+        async function evaluateApplicant(jobText, resumeText, videoData = null, retries = 3) {
             const criteria = collectCriteria();
+            const body = { jobText, resumeText, criteria };
+            if (videoData) {
+                body.videoFrames = videoData.frames;
+                body.videoTranscript = videoData.transcript;
+            }
             for (let attempt = 0; attempt < retries; attempt++) {
                 const response = await fetch('/api/evaluate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ jobText, resumeText, criteria })
+                    body: JSON.stringify(body)
                 });
 
                 if (response.status === 429) {
@@ -821,6 +1127,10 @@
                 const jobSummaryText = await summarizeJobPosting(jobText);
                 document.getElementById('jobSummaryText').textContent = jobSummaryText;
 
+                // Determine transcript mode
+                const transcriptMode = document.querySelector('input[name="transcriptMode"]:checked').value;
+                const manualTranscriptText = document.getElementById('manualTranscript').value.trim();
+
                 // Evaluate each applicant
                 const total = applicantFiles.length;
                 for (let i = 0; i < applicantFiles.length; i++) {
@@ -839,7 +1149,40 @@
                             continue;
                         }
 
-                        const result = await evaluateApplicant(jobText, resumeText);
+                        // Check if there's an associated video for this applicant
+                        let videoData = null;
+                        const associatedVideo = videoFiles[i]; // Match by index
+                        if (associatedVideo) {
+                            try {
+                                // Extract frames
+                                progressText.textContent = `${file.name} の動画フレームを抽出中... (${i + 1}/${total})`;
+                                const frames = await extractFramesFromVideo(associatedVideo.file);
+
+                                // Get transcript
+                                let transcript = '';
+                                if (transcriptMode === 'manual') {
+                                    transcript = manualTranscriptText;
+                                } else {
+                                    // Auto transcription via Whisper
+                                    progressText.textContent = `${file.name} の音声を書き起こし中... (${i + 1}/${total})`;
+                                    if (typeof window.transcribeAudio === 'function') {
+                                        transcript = await window.transcribeAudio(associatedVideo.file, (status) => {
+                                            progressText.textContent = `${file.name}: ${status} (${i + 1}/${total})`;
+                                        });
+                                    } else {
+                                        console.warn('Whisper未ロード。書き起こしをスキップします。');
+                                        transcript = '（自動書き起こし未対応）';
+                                    }
+                                }
+
+                                videoData = { frames, transcript };
+                            } catch (videoError) {
+                                console.error('動画処理エラー:', videoError);
+                                // Continue evaluation without video data
+                            }
+                        }
+
+                        const result = await evaluateApplicant(jobText, resumeText, videoData);
                         result.filename = file.name;
                         allResults.push(result);
                     } catch (error) {
@@ -848,9 +1191,11 @@
 
                     progressFill.style.width = `${10 + ((i + 1) / total) * 85}%`;
 
-                    // レートリミット対策: 次の応募者評価まで8秒待機
+                    // レートリミット対策: 動画ありの場合は15秒、なしの場合は8秒待機
                     if (i < applicantFiles.length - 1) {
-                        for (let wait = 8; wait > 0; wait--) {
+                        const hasVideo = videoFiles[i] != null;
+                        const waitTime = hasVideo ? 15 : 8;
+                        for (let wait = waitTime; wait > 0; wait--) {
                             progressText.textContent = `次の評価まで ${wait}秒待機中... (${i + 1}/${total} 完了)`;
                             await sleep(1000);
                         }
@@ -889,15 +1234,17 @@
 
             resultsBody.innerHTML = results.map((result, idx) => {
                 if (result.error) {
-                    return `<tr class="error-row"><td colspan="7"><strong>${result.filename}</strong>: ${result.error}</td></tr>`;
+                    return `<tr class="error-row"><td colspan="8"><strong>${result.filename}</strong>: ${result.error}</td></tr>`;
                 }
 
                 const rec = (result.recommendation || 'C').charAt(0).toUpperCase();
                 const matchRate = result.match_rate || 0;
+                const hasVideo = result.video_evaluation ? true : false;
 
                 return `
                     <tr>
                         <td><span class="badge badge-${rec.toLowerCase()}">${rec}</span></td>
+                        <td>${hasVideo ? '<span class="video-badge" style="color:#9c27b0">&#127909;</span>' : '-'}</td>
                         <td><span class="score">${result.score || '-'}</span></td>
                         <td>${result.name || '不明'}</td>
                         <td class="match-cell">
@@ -924,6 +1271,59 @@
             const missingSkills = (result.missing_skills || []).map(s => `<span class="tag mismatch">${s}</span>`).join('');
             const quals = (result.qualifications || []).map(q => `<span class="tag qual">${q}</span>`).join('');
             const rec = (result.recommendation || 'C').charAt(0).toUpperCase();
+
+            let videoEvalHTML = '';
+            if (result.video_evaluation) {
+                const ve = result.video_evaluation;
+                const scoreItems = [
+                    { label: '身だしなみ・外見', key: 'appearance' },
+                    { label: 'コミュニケーション', key: 'communication' },
+                    { label: '態度・姿勢', key: 'attitude' },
+                    { label: '内容・論理性', key: 'content' }
+                ];
+
+                const scoreGridHTML = scoreItems.map(item => {
+                    const scoreVal = ve[item.key] || 0;
+                    const pct = (scoreVal / 10) * 100;
+                    return `
+                        <div class="video-score-item">
+                            <div class="vs-label">${item.label}</div>
+                            <div class="vs-score-bar"><div class="vs-score-fill" style="width:${pct}%"></div></div>
+                            <div class="vs-score-value">${scoreVal}/10</div>
+                        </div>
+                    `;
+                }).join('');
+
+                const videoStrengths = (ve.video_strengths || []).map(s => `<li>${s}</li>`).join('');
+                const videoConcerns = (ve.video_concerns || []).map(c => `<li>${c}</li>`).join('');
+
+                videoEvalHTML = `
+                    <div class="video-eval-section">
+                        <h3>&#127909; 動画評価</h3>
+                        <div class="video-score-grid">
+                            ${scoreGridHTML}
+                        </div>
+                        ${ve.overall_impression ? `
+                            <div class="detail-section">
+                                <h3>総合印象</h3>
+                                <p style="font-size:0.875rem;color:#333;padding:8px 0">${ve.overall_impression}</p>
+                            </div>
+                        ` : ''}
+                        ${videoStrengths ? `
+                            <div class="detail-section">
+                                <h3>動画での強み</h3>
+                                <ul>${videoStrengths}</ul>
+                            </div>
+                        ` : ''}
+                        ${videoConcerns ? `
+                            <div class="detail-section">
+                                <h3>動画での懸念点</h3>
+                                <ul class="concerns">${videoConcerns}</ul>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
 
             modalBody.innerHTML = `
                 <h2>${result.name || '不明'}</h2>
@@ -958,6 +1358,7 @@
                     <h3>懸念点</h3>
                     <ul class="concerns">${concerns || '<li>なし</li>'}</ul>
                 </div>
+                ${videoEvalHTML}
             `;
             modal.style.display = 'flex';
         }
@@ -967,6 +1368,47 @@
 
         renderPresetCriteria();
         renderCustomCriteria();
+    </script>
+
+    <script type="module">
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+
+        let whisperPipeline = null;
+
+        window.transcribeAudio = async function(videoFile, onProgress) {
+            try {
+                if (!whisperPipeline) {
+                    onProgress('AIモデルを読み込み中...');
+                    whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+                        dtype: 'q8',
+                        progress_callback: (p) => {
+                            if (p.status === 'downloading') {
+                                onProgress(`モデルダウンロード中... ${Math.round((p.loaded / p.total) * 100)}%`);
+                            }
+                        }
+                    });
+                }
+
+                onProgress('音声を抽出中...');
+                const audioContext = new AudioContext({ sampleRate: 16000 });
+                const arrayBuffer = await videoFile.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                const audioData = audioBuffer.getChannelData(0);
+
+                onProgress('書き起こし中...');
+                const result = await whisperPipeline(audioData, {
+                    language: 'ja',
+                    task: 'transcribe',
+                    chunk_length_s: 30,
+                    stride_length_s: 5,
+                });
+
+                return result.text;
+            } catch (error) {
+                console.error('Whisper error:', error);
+                throw new Error('音声の書き起こしに失敗しました: ' + error.message);
+            }
+        };
     </script>
 </body>
 </html>
