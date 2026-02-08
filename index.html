@@ -6,6 +6,8 @@
     <title>応募者評価ツール</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -210,6 +212,35 @@
             transition: background 0.3s;
         }
         .detail-btn:hover { background: #e0e0e0; }
+        .pdf-btn {
+            padding: 6px 12px;
+            background: #00897b;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: background 0.3s;
+            margin-left: 4px;
+        }
+        .pdf-btn:hover { background: #00695c; }
+        .pdf-btn:disabled { background: #aaa; cursor: wait; }
+        .pdf-download-modal-btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background: #00897b;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 24px;
+            transition: background 0.3s;
+        }
+        .pdf-download-modal-btn:hover { background: #00695c; }
+        .pdf-download-modal-btn:disabled { background: #aaa; cursor: wait; }
         .error-row td { background: #fff3f3; color: #c62828; }
 
         .modal {
@@ -998,6 +1029,19 @@
             return text;
         }
 
+        async function extractFirstPageImage(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            return canvas.toDataURL('image/jpeg', 0.7);
+        }
+
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
@@ -1147,12 +1191,20 @@
 
                         // Check if there's an associated video for this applicant
                         let videoData = null;
+                        let faceImage = null;
+                        let faceImageSource = null;
                         const associatedVideo = videoFiles[i]; // Match by index
                         if (associatedVideo) {
                             try {
                                 // Extract frames
                                 progressText.textContent = `${file.name} の動画フレームを抽出中... (${i + 1}/${total})`;
                                 const frames = await extractFramesFromVideo(associatedVideo.file);
+
+                                // Save first frame as face image
+                                if (frames && frames.length > 0) {
+                                    faceImage = 'data:image/jpeg;base64,' + frames[0].data;
+                                    faceImageSource = 'video';
+                                }
 
                                 // Get transcript
                                 let transcript = '';
@@ -1179,8 +1231,20 @@
                             }
                         }
 
+                        // If no video face image, extract from PDF first page
+                        if (!faceImage) {
+                            try {
+                                faceImage = await extractFirstPageImage(file);
+                                faceImageSource = 'pdf';
+                            } catch (e) {
+                                console.warn('PDFからの画像抽出失敗:', e);
+                            }
+                        }
+
                         const result = await evaluateApplicant(jobText, resumeText, videoData);
                         result.filename = file.name;
+                        result._faceImage = faceImage;
+                        result._faceImageSource = faceImageSource;
                         allResults.push(result);
                     } catch (error) {
                         allResults.push({ filename: file.name, error: error.message });
@@ -1250,7 +1314,10 @@
                         </td>
                         <td>${result.experience_years || '-'}</td>
                         <td class="summary-cell">${result.summary || '-'}</td>
-                        <td><button class="detail-btn" onclick="showDetail(${idx})">詳細</button></td>
+                        <td>
+                            <button class="detail-btn" onclick="showDetail(${idx})">詳細</button>
+                            <button class="pdf-btn" onclick="generatePDFReport(${idx})">PDF</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -1356,8 +1423,197 @@
                     <ul class="concerns">${concerns || '<li>なし</li>'}</ul>
                 </div>
                 ${videoEvalHTML}
+                <button class="pdf-download-modal-btn" onclick="generatePDFReport(${idx}); return false;">PDFレポートをダウンロード</button>
             `;
             modal.style.display = 'flex';
+        }
+
+        async function generatePDFReport(idx) {
+            const sorted = [...allResults].sort((a, b) => (b.score || 0) - (a.score || 0));
+            const result = sorted[idx];
+            if (!result || result.error) return;
+
+            // Disable buttons during generation
+            const btns = document.querySelectorAll('.pdf-btn, .pdf-download-modal-btn');
+            btns.forEach(b => { b.disabled = true; b.textContent = '生成中...'; });
+
+            try {
+                const rec = (result.recommendation || 'C').charAt(0).toUpperCase();
+                const recColors = { A: '#2e7d32', B: '#1976d2', C: '#f57c00', D: '#c62828' };
+                const recBgs = { A: '#e8f5e9', B: '#e3f2fd', C: '#fff3e0', D: '#ffebee' };
+                const recLabels = { A: '強くおすすめ', B: '面談推奨', C: '要検討', D: '見送り推奨' };
+                const color = recColors[rec] || '#666';
+                const bg = recBgs[rec] || '#f5f5f5';
+
+                const today = new Date();
+                const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+
+                // Face image
+                const faceImg = result._faceImage;
+                const faceSource = result._faceImageSource;
+                let faceHTML = '';
+                if (faceImg && faceSource === 'video') {
+                    faceHTML = `<div style="flex-shrink:0;text-align:center;">
+                        <img src="${faceImg}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;border:1px solid #ddd;" />
+                        <div style="font-size:10px;color:#999;margin-top:4px;">面接動画より</div>
+                    </div>`;
+                } else if (faceImg && faceSource === 'pdf') {
+                    faceHTML = `<div style="flex-shrink:0;text-align:center;">
+                        <img src="${faceImg}" style="width:90px;height:127px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid #ddd;" />
+                        <div style="font-size:10px;color:#999;margin-top:4px;">履歴書より</div>
+                    </div>`;
+                }
+
+                // Build skill/tag HTML
+                const matchingSkillsHTML = (result.matching_skills || []).map(s =>
+                    `<span style="display:inline-block;padding:3px 10px;background:#e8f5e9;color:#2e7d32;border-radius:12px;font-size:12px;margin:2px;">${s}</span>`
+                ).join('');
+                const missingSkillsHTML = (result.missing_skills || []).map(s =>
+                    `<span style="display:inline-block;padding:3px 10px;background:#fff3e0;color:#f57c00;border-radius:12px;font-size:12px;margin:2px;">${s}</span>`
+                ).join('');
+                const qualsHTML = (result.qualifications || []).map(q =>
+                    `<span style="display:inline-block;padding:3px 10px;background:#f3e5f5;color:#7b1fa2;border-radius:12px;font-size:12px;margin:2px;">${q}</span>`
+                ).join('');
+                const strengthsHTML = (result.strengths || []).map(s =>
+                    `<li style="padding:4px 0;padding-left:16px;position:relative;font-size:13px;"><span style="position:absolute;left:0;color:#4a6cf7;">&#8226;</span>${s}</li>`
+                ).join('');
+                const concernsHTML = (result.concerns || []).map(c =>
+                    `<li style="padding:4px 0;padding-left:16px;position:relative;font-size:13px;"><span style="position:absolute;left:0;color:#f57c00;">&#8226;</span>${c}</li>`
+                ).join('');
+
+                // Video evaluation section
+                let videoSectionHTML = '';
+                if (result.video_evaluation) {
+                    const ve = result.video_evaluation;
+                    const scores = [
+                        { label: '身だしなみ・外見', val: parseInt(ve.appearance_score) || 0 },
+                        { label: 'コミュニケーション', val: parseInt(ve.communication_score) || 0 },
+                        { label: '態度・姿勢', val: parseInt(ve.attitude_score) || 0 },
+                        { label: '内容・論理性', val: parseInt(ve.content_score) || 0 }
+                    ];
+                    const scoresHTML = scores.map(s => `
+                        <div style="flex:1;min-width:45%;background:white;border-radius:6px;padding:10px;border:1px solid #e8d5f5;">
+                            <div style="font-size:11px;color:#666;margin-bottom:4px;">${s.label}</div>
+                            <div style="height:5px;background:#e0d4f0;border-radius:3px;overflow:hidden;margin-bottom:3px;">
+                                <div style="height:100%;width:${(s.val/5)*100}%;background:#9c27b0;border-radius:3px;"></div>
+                            </div>
+                            <div style="font-size:12px;font-weight:700;color:#9c27b0;text-align:right;">${s.val}/5</div>
+                        </div>
+                    `).join('');
+                    const vsStrengths = (ve.video_strengths || []).map(s =>
+                        `<li style="padding:3px 0;padding-left:16px;position:relative;font-size:12px;"><span style="position:absolute;left:0;color:#9c27b0;">&#8226;</span>${s}</li>`
+                    ).join('');
+                    const vsConcerns = (ve.video_concerns || []).map(c =>
+                        `<li style="padding:3px 0;padding-left:16px;position:relative;font-size:12px;"><span style="position:absolute;left:0;color:#f57c00;">&#8226;</span>${c}</li>`
+                    ).join('');
+
+                    videoSectionHTML = `
+                        <div style="margin-top:20px;padding:16px;background:#faf5ff;border-radius:8px;border:1px solid #e8d5f5;">
+                            <h3 style="font-size:14px;color:#9c27b0;margin:0 0 12px 0;">&#127909; 動画評価</h3>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">${scoresHTML}</div>
+                            ${ve.overall_impression ? `<p style="font-size:13px;color:#333;padding:8px 0;margin:0;">${ve.overall_impression}</p>` : ''}
+                            ${vsStrengths ? `<div style="margin-top:8px;"><h4 style="font-size:12px;color:#666;margin:0 0 4px 0;">動画での強み</h4><ul style="list-style:none;padding:0;margin:0;">${vsStrengths}</ul></div>` : ''}
+                            ${vsConcerns ? `<div style="margin-top:8px;"><h4 style="font-size:12px;color:#666;margin:0 0 4px 0;">動画での懸念点</h4><ul style="list-style:none;padding:0;margin:0;">${vsConcerns}</ul></div>` : ''}
+                        </div>
+                    `;
+                }
+
+                const reportHTML = `
+                    <div style="border-bottom:3px solid #4a6cf7;padding-bottom:16px;margin-bottom:24px;">
+                        <h1 style="font-size:22px;color:#1a1a2e;margin:0;">応募者評価レポート</h1>
+                        <p style="color:#999;font-size:12px;margin:4px 0 0 0;">生成日: ${dateStr}</p>
+                    </div>
+                    <div style="display:flex;gap:20px;margin-bottom:24px;">
+                        ${faceHTML}
+                        <div style="flex:1;">
+                            <h2 style="font-size:20px;color:#1a1a2e;margin:0 0 8px 0;">${result.name || '不明'}</h2>
+                            <p style="font-size:12px;color:#999;margin:0 0 12px 0;">ファイル: ${result.filename}</p>
+                            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                                <span style="display:inline-block;padding:6px 16px;background:${bg};color:${color};border-radius:6px;font-weight:700;font-size:18px;">${rec} ${recLabels[rec]}</span>
+                                <span style="font-size:20px;font-weight:700;color:#333;">${result.score}点</span>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="font-size:13px;color:#666;">マッチ度:</span>
+                                <div style="flex:1;max-width:200px;height:8px;background:#e0e0e0;border-radius:4px;overflow:hidden;">
+                                    <div style="height:100%;width:${result.match_rate || 0}%;background:${color};border-radius:4px;"></div>
+                                </div>
+                                <span style="font-size:14px;font-weight:600;color:${color};">${result.match_rate || 0}%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="padding:14px;background:#f8f9fa;border-radius:8px;margin-bottom:20px;font-size:14px;color:#333;">
+                        ${result.summary || '-'}
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 関連経験</h3>
+                        <p style="font-size:14px;margin:0;">${result.experience_years || '不明'}</p>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; マッチしているスキル</h3>
+                        <div>${matchingSkillsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 不足しているスキル</h3>
+                        <div>${missingSkillsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 保有資格</h3>
+                        <div>${qualsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; この募集に対する強み</h3>
+                        <ul style="list-style:none;padding:0;margin:0;">${strengthsHTML || '<li style="font-size:13px;color:#999;">なし</li>'}</ul>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 懸念点</h3>
+                        <ul style="list-style:none;padding:0;margin:0;">${concernsHTML || '<li style="font-size:13px;color:#999;">なし</li>'}</ul>
+                    </div>
+                    ${videoSectionHTML}
+                    <div style="margin-top:30px;padding-top:16px;border-top:1px solid #eee;text-align:center;font-size:11px;color:#999;">
+                        応募者評価ツール - Powered by Claude AI
+                    </div>
+                `;
+
+                // Create hidden container and render
+                const container = document.createElement('div');
+                container.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;padding:40px;background:white;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#333;line-height:1.6;';
+                container.innerHTML = reportHTML;
+                document.body.appendChild(container);
+
+                const canvas = await html2canvas(container, { scale: 2, useCORS: true, logging: false });
+                document.body.removeChild(container);
+
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pageWidth = 210;
+                const pageHeight = 297;
+                const imgWidth = pageWidth;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position -= pageHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                const name = result.name || '不明';
+                pdf.save(`評価レポート_${name}.pdf`);
+            } catch (err) {
+                console.error('PDF生成エラー:', err);
+                alert('PDF生成に失敗しました: ' + err.message);
+            } finally {
+                btns.forEach(b => { b.disabled = false; });
+                document.querySelectorAll('.pdf-btn').forEach(b => { b.textContent = 'PDF'; });
+                document.querySelectorAll('.pdf-download-modal-btn').forEach(b => { b.textContent = 'PDFレポートをダウンロード'; });
+            }
         }
 
         document.querySelector('.close-btn').addEventListener('click', () => modal.style.display = 'none');
