@@ -533,8 +533,9 @@
             <div id="videoFileList" class="file-list"></div>
             <div id="transcriptSection" style="display:none;margin-top:16px;">
                 <div class="transcript-mode">
-                    <label><input type="radio" name="transcriptMode" value="auto" checked onchange="updateTranscriptMode()"> 自動書き起こし（ブラウザ内AI）</label>
-                    <label style="margin-left:16px"><input type="radio" name="transcriptMode" value="manual" onchange="updateTranscriptMode()"> 手動入力</label>
+                    <label><input type="radio" name="transcriptMode" value="skip" checked onchange="updateTranscriptMode()"> 映像のみで評価（最速）</label>
+                    <label style="margin-left:12px"><input type="radio" name="transcriptMode" value="manual" onchange="updateTranscriptMode()"> 手動入力</label>
+                    <label style="margin-left:12px"><input type="radio" name="transcriptMode" value="auto" onchange="updateTranscriptMode()"> 自動書き起こし（遅い）</label>
                 </div>
                 <div id="manualTranscriptArea" class="transcript-area" style="display:none;margin-top:12px">
                     <textarea id="manualTranscript" placeholder="面接の書き起こしテキストを貼り付けてください..." rows="5"></textarea>
@@ -875,9 +876,12 @@
             if (mode === 'manual') {
                 manualArea.style.display = 'block';
                 whisperStatus.textContent = '';
+            } else if (mode === 'auto') {
+                manualArea.style.display = 'none';
+                whisperStatus.textContent = '評価開始時に自動で書き起こしを行います（初回はモデルDL ~75MB）';
             } else {
                 manualArea.style.display = 'none';
-                whisperStatus.textContent = '評価開始時に自動で書き起こしを行います';
+                whisperStatus.textContent = '動画フレームのみで素早く評価します（書き起こしなし）';
             }
         }
 
@@ -998,7 +1002,7 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        async function extractFramesFromVideo(videoFile, maxFrames = 20) {
+        async function extractFramesFromVideo(videoFile, maxFrames = 5) {
             return new Promise((resolve, reject) => {
                 const video = document.createElement('video');
                 const canvas = document.createElement('canvas');
@@ -1010,21 +1014,13 @@
 
                 video.onloadedmetadata = async () => {
                     const duration = video.duration;
-                    let interval;
-                    if (duration <= 60) interval = 5;
-                    else if (duration <= 300) interval = 15;
-                    else if (duration <= 900) interval = 30;
-                    else if (duration <= 1800) interval = 60;
-                    else interval = 90;
-
+                    // 動画の長さに関係なく均等に5箇所からフレーム取得
                     let timestamps = [];
-                    for (let t = 0; t < duration; t += interval) timestamps.push(t);
-                    if (timestamps.length > maxFrames) {
-                        const step = Math.floor(timestamps.length / maxFrames);
-                        timestamps = timestamps.filter((_, i) => i % step === 0).slice(0, maxFrames);
+                    for (let i = 0; i < maxFrames; i++) {
+                        timestamps.push((duration / (maxFrames + 1)) * (i + 1));
                     }
 
-                    const maxDim = 1092;
+                    const maxDim = 512;
                     const scale = Math.min(maxDim / video.videoWidth, maxDim / video.videoHeight, 1);
                     canvas.width = Math.round(video.videoWidth * scale);
                     canvas.height = Math.round(video.videoHeight * scale);
@@ -1034,7 +1030,7 @@
                         video.currentTime = t;
                         await new Promise(r => { video.onseeked = r; });
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                         frames.push({ timestamp: t, data: dataUrl.split(',')[1] });
                     }
                     URL.revokeObjectURL(url);
@@ -1162,18 +1158,19 @@
                                 let transcript = '';
                                 if (transcriptMode === 'manual') {
                                     transcript = manualTranscriptText;
-                                } else {
-                                    // Auto transcription via Whisper
-                                    progressText.textContent = `${file.name} の音声を書き起こし中... (${i + 1}/${total})`;
-                                    if (typeof window.transcribeAudio === 'function') {
-                                        transcript = await window.transcribeAudio(associatedVideo.file, (status) => {
-                                            progressText.textContent = `${file.name}: ${status} (${i + 1}/${total})`;
-                                        });
-                                    } else {
-                                        console.warn('Whisper未ロード。書き起こしをスキップします。');
-                                        transcript = '（自動書き起こし未対応）';
+                                } else if (transcriptMode === 'auto') {
+                                    try {
+                                        progressText.textContent = `${file.name} の音声を書き起こし中... (${i + 1}/${total})`;
+                                        if (typeof window.transcribeAudio === 'function') {
+                                            transcript = await window.transcribeAudio(associatedVideo.file, (status) => {
+                                                progressText.textContent = `${file.name}: ${status} (${i + 1}/${total})`;
+                                            });
+                                        }
+                                    } catch (whisperErr) {
+                                        console.warn('書き起こしスキップ:', whisperErr);
                                     }
                                 }
+                                // transcriptMode === 'skip' の場合は transcript = '' のまま
 
                                 videoData = { frames, transcript };
                             } catch (videoError) {
@@ -1194,7 +1191,7 @@
                     // レートリミット対策: 動画ありの場合は15秒、なしの場合は8秒待機
                     if (i < applicantFiles.length - 1) {
                         const hasVideo = videoFiles[i] != null;
-                        const waitTime = hasVideo ? 15 : 8;
+                        const waitTime = hasVideo ? 10 : 8;
                         for (let wait = waitTime; wait > 0; wait--) {
                             progressText.textContent = `次の評価まで ${wait}秒待機中... (${i + 1}/${total} 完了)`;
                             await sleep(1000);

@@ -153,7 +153,7 @@ ${videoSection}
     // Build content array (text + optional images)
     const content = [{ type: 'text', text: prompt }];
     if (hasVideo) {
-      const frames = videoFrames.slice(0, 20);
+      const frames = videoFrames.slice(0, 5);
       for (const frame of frames) {
         const ts = frame.timestamp || 0;
         const min = Math.floor(ts / 60);
