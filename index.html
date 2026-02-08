@@ -252,6 +252,69 @@
         .footer { text-align: center; margin-top: 40px; font-size: 0.75rem; color: #999; }
         .footer a { color: #4a6cf7; text-decoration: none; }
 
+        .criteria-section {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+            border-top: 3px solid #4a6cf7;
+        }
+        .criteria-header { cursor: pointer; user-select: none; }
+        .criteria-header h2 {
+            font-size: 1.1rem;
+            color: #1a1a2e;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .criteria-toggle { margin-left: auto; font-size: 0.75rem; color: #999; transition: transform 0.3s; }
+        .criteria-toggle.open { transform: rotate(180deg); }
+        .criteria-subtitle { font-size: 0.8rem; color: #999; margin-top: 4px; }
+        .criteria-body { margin-top: 20px; }
+        .criteria-category { margin-bottom: 16px; }
+        .criteria-category h3 {
+            font-size: 0.8rem; color: #4a6cf7; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eef;
+        }
+        .criterion-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 0; gap: 12px;
+        }
+        .criterion-toggle { display: flex; align-items: center; gap: 8px; flex: 1; }
+        .criterion-toggle input[type="checkbox"] { accent-color: #4a6cf7; width: 16px; height: 16px; }
+        .criterion-label { font-size: 0.875rem; color: #333; }
+        .criterion-weight { display: flex; align-items: center; gap: 8px; min-width: 160px; }
+        .criterion-weight input[type="range"] { width: 100px; accent-color: #4a6cf7; }
+        .weight-label { font-size: 0.75rem; color: #666; min-width: 36px; text-align: right; }
+        .criterion-item.disabled .criterion-label { color: #bbb; }
+        .criterion-item.disabled .criterion-weight { opacity: 0.3; pointer-events: none; }
+        .custom-criteria-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid #eee; }
+        .custom-criteria-section h3 { font-size: 0.875rem; color: #1a1a2e; margin-bottom: 4px; }
+        .custom-hint { font-size: 0.75rem; color: #999; margin-bottom: 12px; }
+        .custom-criteria-add { display: flex; gap: 8px; margin-top: 8px; }
+        .custom-criteria-add input[type="text"] {
+            flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
+            font-size: 0.875rem; outline: none; transition: border-color 0.3s;
+        }
+        .custom-criteria-add input[type="text"]:focus { border-color: #4a6cf7; }
+        .custom-criteria-add button {
+            padding: 8px 16px; background: #4a6cf7; color: white; border: none;
+            border-radius: 6px; cursor: pointer; font-size: 0.875rem; transition: background 0.3s;
+        }
+        .custom-criteria-add button:hover { background: #3a5ce7; }
+        .custom-criterion-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+            background: #f8f9fa; border-radius: 6px; margin-bottom: 6px; font-size: 0.875rem;
+        }
+        .custom-text { flex: 1; color: #333; }
+        .criteria-actions { margin-top: 16px; text-align: right; }
+        .criteria-reset-btn {
+            padding: 6px 16px; background: none; border: 1px solid #ddd; border-radius: 6px;
+            color: #666; cursor: pointer; font-size: 0.8rem; transition: all 0.3s;
+        }
+        .criteria-reset-btn:hover { border-color: #999; color: #333; }
+
         @media (max-width: 768px) {
             .upload-grid { grid-template-columns: 1fr; }
             .results-summary { grid-template-columns: repeat(2, 1fr); }
@@ -303,6 +366,32 @@
                     </label>
                 </div>
                 <div id="applicantFileList" class="file-list"></div>
+            </div>
+        </div>
+
+        <div class="criteria-section">
+            <div class="criteria-header" onclick="toggleCriteriaPanel()">
+                <h2>
+                    <span class="step">&#9881;</span>
+                    評価基準の設定
+                    <span class="criteria-toggle" id="criteriaToggle">&#9660;</span>
+                </h2>
+                <p class="criteria-subtitle">評価の観点と重要度をカスタマイズできます</p>
+            </div>
+            <div id="criteriaBody" class="criteria-body" style="display: none;">
+                <div id="presetCriteriaContainer"></div>
+                <div class="custom-criteria-section">
+                    <h3>カスタム評価基準</h3>
+                    <p class="custom-hint">独自の評価観点を自由に追加できます（最大5件）</p>
+                    <div id="customCriteriaList"></div>
+                    <div class="custom-criteria-add">
+                        <input type="text" id="customCriteriaInput" placeholder="例: 英語でのドキュメント作成経験" maxlength="100">
+                        <button onclick="addCustomCriterion()">追加</button>
+                    </div>
+                </div>
+                <div class="criteria-actions">
+                    <button class="criteria-reset-btn" onclick="resetCriteria()">デフォルトに戻す</button>
+                </div>
             </div>
         </div>
 
@@ -375,6 +464,117 @@
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const DEFAULT_CRITERIA = [
+            { id: 'skill_match',       label: '必須スキルのマッチ度',         category: 'スキル・経験',       weight: 5, enabled: true },
+            { id: 'experience_rel',    label: '業界・職種の経験関連性',       category: 'スキル・経験',       weight: 4, enabled: true },
+            { id: 'optional_skills',   label: '歓迎スキルの保有',            category: 'スキル・経験',       weight: 3, enabled: true },
+            { id: 'qualifications',    label: '関連資格の保有',              category: 'スキル・経験',       weight: 2, enabled: true },
+            { id: 'culture_fit',       label: 'カルチャーフィット',           category: 'パーソナリティ',     weight: 3, enabled: false },
+            { id: 'leadership',        label: 'リーダーシップ・マネジメント', category: 'パーソナリティ',     weight: 2, enabled: false },
+            { id: 'teamwork',          label: 'チームワーク・協調性',         category: 'パーソナリティ',     weight: 3, enabled: false },
+            { id: 'communication',     label: 'コミュニケーション能力',       category: 'コミュニケーション', weight: 3, enabled: false },
+            { id: 'presentation',      label: 'プレゼンテーション・文書力',   category: 'コミュニケーション', weight: 2, enabled: false },
+            { id: 'motivation',        label: '志望動機・意欲',              category: 'モチベーション',     weight: 3, enabled: false },
+            { id: 'growth_potential',   label: '成長ポテンシャル',            category: 'モチベーション',     weight: 2, enabled: false },
+            { id: 'career_consistency', label: 'キャリアの一貫性',            category: 'モチベーション',     weight: 2, enabled: false },
+        ];
+        const WEIGHT_LABELS = { 1: '低', 2: 'やや低', 3: '標準', 4: 'やや高', 5: '高' };
+        let criteriaState = JSON.parse(JSON.stringify(DEFAULT_CRITERIA));
+        let customCriteria = [];
+
+        function toggleCriteriaPanel() {
+            const body = document.getElementById('criteriaBody');
+            const toggle = document.getElementById('criteriaToggle');
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                toggle.classList.add('open');
+            } else {
+                body.style.display = 'none';
+                toggle.classList.remove('open');
+            }
+        }
+
+        function renderPresetCriteria() {
+            const container = document.getElementById('presetCriteriaContainer');
+            const categories = {};
+            criteriaState.forEach(c => {
+                if (!categories[c.category]) categories[c.category] = [];
+                categories[c.category].push(c);
+            });
+            container.innerHTML = Object.entries(categories).map(([cat, items]) => `
+                <div class="criteria-category">
+                    <h3>${cat}</h3>
+                    ${items.map(c => `
+                        <div class="criterion-item ${c.enabled ? '' : 'disabled'}">
+                            <label class="criterion-toggle">
+                                <input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="toggleCriterion('${c.id}')">
+                                <span class="criterion-label">${c.label}</span>
+                            </label>
+                            <div class="criterion-weight">
+                                <input type="range" min="1" max="5" value="${c.weight}" oninput="updateWeight('${c.id}', this.value, this)">
+                                <span class="weight-label">${WEIGHT_LABELS[c.weight]}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `).join('');
+        }
+
+        function toggleCriterion(id) {
+            const c = criteriaState.find(c => c.id === id);
+            if (c) { c.enabled = !c.enabled; renderPresetCriteria(); }
+        }
+
+        function updateWeight(id, value, el) {
+            const c = criteriaState.find(c => c.id === id);
+            if (c) { c.weight = parseInt(value); el.nextElementSibling.textContent = WEIGHT_LABELS[value]; }
+        }
+
+        function addCustomCriterion() {
+            const input = document.getElementById('customCriteriaInput');
+            const text = input.value.trim();
+            if (!text) return;
+            if (customCriteria.length >= 5) { alert('カスタム基準は最大5件までです'); return; }
+            customCriteria.push({ text, weight: 3 });
+            input.value = '';
+            renderCustomCriteria();
+        }
+
+        function removeCustomCriterion(index) {
+            customCriteria.splice(index, 1);
+            renderCustomCriteria();
+        }
+
+        function updateCustomWeight(index, value, el) {
+            customCriteria[index].weight = parseInt(value);
+            el.nextElementSibling.textContent = WEIGHT_LABELS[value];
+        }
+
+        function renderCustomCriteria() {
+            const list = document.getElementById('customCriteriaList');
+            list.innerHTML = customCriteria.map((c, i) => `
+                <div class="custom-criterion-item">
+                    <span class="custom-text">${c.text}</span>
+                    <input type="range" min="1" max="5" value="${c.weight}" oninput="updateCustomWeight(${i}, this.value, this)">
+                    <span class="weight-label">${WEIGHT_LABELS[c.weight]}</span>
+                    <button class="remove-btn" onclick="removeCustomCriterion(${i})">×</button>
+                </div>
+            `).join('');
+        }
+
+        function resetCriteria() {
+            criteriaState = JSON.parse(JSON.stringify(DEFAULT_CRITERIA));
+            customCriteria = [];
+            renderPresetCriteria();
+            renderCustomCriteria();
+        }
+
+        function collectCriteria() {
+            const enabled = criteriaState.filter(c => c.enabled).map(c => ({ label: c.label, weight: c.weight }));
+            const custom = customCriteria.map(c => ({ label: c.text, weight: c.weight }));
+            return { preset: enabled, custom: custom };
+        }
 
         const jobDropZone = document.getElementById('jobDropZone');
         const jobFileInput = document.getElementById('jobFileInput');
@@ -539,31 +739,56 @@
             return text;
         }
 
-        async function evaluateApplicant(jobText, resumeText) {
-            const response = await fetch('/api/evaluate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ jobText, resumeText })
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'API Error');
-            }
-
-            return response.json();
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        async function summarizeJobPosting(jobText) {
-            const response = await fetch('/api/summarize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ jobText })
-            });
+        async function evaluateApplicant(jobText, resumeText, retries = 3) {
+            const criteria = collectCriteria();
+            for (let attempt = 0; attempt < retries; attempt++) {
+                const response = await fetch('/api/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobText, resumeText, criteria })
+                });
 
-            if (!response.ok) return '募集要項';
-            const data = await response.json();
-            return data.summary;
+                if (response.status === 429) {
+                    const waitSec = (attempt + 1) * 15;
+                    progressText.textContent = `レート制限中... ${waitSec}秒後にリトライします`;
+                    await sleep(waitSec * 1000);
+                    continue;
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'API Error');
+                }
+
+                return response.json();
+            }
+            throw new Error('レート制限のため評価できませんでした。時間を置いて再試行してください。');
+        }
+
+        async function summarizeJobPosting(jobText, retries = 3) {
+            for (let attempt = 0; attempt < retries; attempt++) {
+                const response = await fetch('/api/summarize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobText })
+                });
+
+                if (response.status === 429) {
+                    const waitSec = (attempt + 1) * 15;
+                    progressText.textContent = `レート制限中... ${waitSec}秒後にリトライします`;
+                    await sleep(waitSec * 1000);
+                    continue;
+                }
+
+                if (!response.ok) return '募集要項';
+                const data = await response.json();
+                return data.summary;
+            }
+            return '募集要項';
         }
 
         evaluateBtn.addEventListener('click', async () => {
@@ -622,6 +847,14 @@
                     }
 
                     progressFill.style.width = `${10 + ((i + 1) / total) * 85}%`;
+
+                    // レートリミット対策: 次の応募者評価まで8秒待機
+                    if (i < applicantFiles.length - 1) {
+                        for (let wait = 8; wait > 0; wait--) {
+                            progressText.textContent = `次の評価まで ${wait}秒待機中... (${i + 1}/${total} 完了)`;
+                            await sleep(1000);
+                        }
+                    }
                 }
 
                 progressFill.style.width = '100%';
@@ -731,6 +964,9 @@
 
         document.querySelector('.close-btn').addEventListener('click', () => modal.style.display = 'none');
         modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+        renderPresetCriteria();
+        renderCustomCriteria();
     </script>
 </body>
 </html>

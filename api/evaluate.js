@@ -1,5 +1,40 @@
+const MAX_TEXT_LENGTH = 3000;
+
+function truncateText(text, maxLen) {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '\n...(以下省略)';
+}
+
+async function callAnthropicWithRetry(apiKey, body, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('retry-after');
+      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : (attempt + 1) * 10000;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      continue;
+    }
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || `API Error (${response.status})`);
+    }
+
+    return response.json();
+  }
+  throw new Error('Rate limit exceeded after retries. Please try again later.');
+}
+
 module.exports = async function handler(req, res) {
-  // CORSヘッダー
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,26 +53,50 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { jobText, resumeText } = req.body;
+    const { jobText, resumeText, criteria } = req.body;
 
     if (!jobText || !resumeText) {
       return res.status(400).json({ error: 'Missing jobText or resumeText' });
+    }
+
+    const trimmedJob = truncateText(jobText, MAX_TEXT_LENGTH);
+    const trimmedResume = truncateText(resumeText, MAX_TEXT_LENGTH);
+
+    // Build evaluation points from criteria
+    let evaluationPoints;
+    if (criteria && typeof criteria === 'object') {
+      const sanitize = (arr) => {
+        if (!Array.isArray(arr)) return [];
+        return arr
+          .filter(c => c && typeof c.label === 'string' && c.label.length <= 100)
+          .slice(0, 12)
+          .map(c => ({ label: c.label.trim(), weight: Math.max(1, Math.min(5, parseInt(c.weight) || 3)) }));
+      };
+      const allCriteria = [...sanitize(criteria.preset), ...sanitize(criteria.custom).slice(0, 5)];
+      if (allCriteria.length > 0) {
+        const weightDesc = { 1: '参考程度', 2: 'やや重視', 3: '標準的に重視', 4: '重視', 5: '最重視' };
+        allCriteria.sort((a, b) => b.weight - a.weight);
+        evaluationPoints = allCriteria.map((c, i) => `${i + 1}. ${c.label}（重要度: ${weightDesc[c.weight]}）`).join('\n');
+      }
+    }
+    if (!evaluationPoints) {
+      evaluationPoints = `1. 必須スキル・経験のマッチ度\n2. 歓迎スキル・経験の有無\n3. 職種・業界経験の関連性\n4. 応募者の強みと募集ポジションの適合性`;
     }
 
     const prompt = `あなたは採用担当者のアシスタントです。
 募集要項と応募者の書類を比較し、この応募者が募集要件にマッチしているかを評価してください。
 
 【募集要項】
-${jobText}
+${trimmedJob}
 
 【応募者の書類（履歴書・職務経歴書）】
-${resumeText}
+${trimmedResume}
 
-【評価ポイント】
-1. 必須スキル・経験のマッチ度
-2. 歓迎スキル・経験の有無
-3. 職種・業界経験の関連性
-4. 応募者の強みと募集ポジションの適合性
+【評価ポイント（重要度順）】
+${evaluationPoints}
+
+上記の評価ポイントの重要度に応じて、重み付けしてスコアとマッチ度を算出してください。
+「最重視」の項目は評価への影響が最も大きく、「参考程度」の項目は軽微な影響としてください。
 
 【出力形式】
 以下のJSON形式で出力してください。他の文章は不要です。
@@ -61,29 +120,14 @@ ${resumeText}
 - C（要検討）: マッチ度40-59%、一部要件を満たす
 - D（見送り推奨）: マッチ度40%未満、要件との乖離が大きい`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }]
-      })
+    const data = await callAnthropicWithRetry(apiKey, {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }]
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      return res.status(response.status).json({ error: error.error?.message || 'API Error' });
-    }
-
-    const data = await response.json();
     const text = data.content[0].text;
 
-    // Extract JSON
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}') + 1;
     if (start !== -1 && end > start) {
