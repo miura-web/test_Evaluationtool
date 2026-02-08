@@ -1273,20 +1273,20 @@
             if (result.video_evaluation) {
                 const ve = result.video_evaluation;
                 const scoreItems = [
-                    { label: '身だしなみ・外見', key: 'appearance' },
-                    { label: 'コミュニケーション', key: 'communication' },
-                    { label: '態度・姿勢', key: 'attitude' },
-                    { label: '内容・論理性', key: 'content' }
+                    { label: '身だしなみ・外見', key: 'appearance_score' },
+                    { label: 'コミュニケーション', key: 'communication_score' },
+                    { label: '態度・姿勢', key: 'attitude_score' },
+                    { label: '内容・論理性', key: 'content_score' }
                 ];
 
                 const scoreGridHTML = scoreItems.map(item => {
-                    const scoreVal = ve[item.key] || 0;
-                    const pct = (scoreVal / 10) * 100;
+                    const scoreVal = parseInt(ve[item.key]) || 0;
+                    const pct = (scoreVal / 5) * 100;
                     return `
                         <div class="video-score-item">
                             <div class="vs-label">${item.label}</div>
                             <div class="vs-score-bar"><div class="vs-score-fill" style="width:${pct}%"></div></div>
-                            <div class="vs-score-value">${scoreVal}/10</div>
+                            <div class="vs-score-value">${scoreVal}/5</div>
                         </div>
                     `;
                 }).join('');
