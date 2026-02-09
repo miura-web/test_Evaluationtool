@@ -199,11 +199,26 @@ ${videoSection}
     const end = text.lastIndexOf('}') + 1;
     if (start !== -1 && end > start) {
       const result = JSON.parse(text.slice(start, end));
+      result._debug = {
+        hasResumePDF,
+        resumePDFLength: resumePDF ? resumePDF.length : 0,
+        resumeTextLength: resumeText ? resumeText.length : 0,
+        contentBlocks: content.length,
+        modelUsed: useMultimodal ? 'multimodal' : 'text-only'
+      };
       return res.status(200).json(result);
     }
 
     return res.status(500).json({ error: 'Invalid response format' });
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+};
+
+module.exports.config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb'
+    }
   }
 };

@@ -672,6 +672,10 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+        // CMapサポート設定（CJKフォントのテキスト抽出改善用）
+        const PDFJS_CMAP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
+        const PDFJS_CMAP_PACKED = true;
+
         const DEFAULT_CRITERIA = [
             { id: 'skill_match',       label: '必須スキルのマッチ度',         category: 'スキル・経験',       weight: 5, enabled: true },
             { id: 'experience_rel',    label: '業界・職種の経験関連性',       category: 'スキル・経験',       weight: 4, enabled: true },
@@ -976,7 +980,7 @@
 
         async function extractTextFromPDF(file, useOCR = false) {
             const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: PDFJS_CMAP_URL, cMapPacked: PDFJS_CMAP_PACKED }).promise;
             let text = '';
 
             // まず通常のテキスト抽出を試みる
@@ -1031,7 +1035,7 @@
 
         async function extractFirstPageImage(file) {
             const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: PDFJS_CMAP_URL, cMapPacked: PDFJS_CMAP_PACKED }).promise;
             const page = await pdf.getPage(1);
             const viewport = page.getViewport({ scale: 1.0 });
             const canvas = document.createElement('canvas');
@@ -1086,7 +1090,7 @@
 
         async function extractPDFPageImages(file, maxPages = 3) {
             const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: PDFJS_CMAP_URL, cMapPacked: PDFJS_CMAP_PACKED }).promise;
             const pages = Math.min(pdf.numPages, maxPages);
             const images = [];
             for (let i = 1; i <= pages; i++) {
@@ -1221,6 +1225,7 @@
                         let resumePDF = null;
                         try {
                             resumePDF = await fileToBase64(file);
+                            console.log(`[DEBUG] resumePDF生成成功: ${resumePDF ? resumePDF.length + '文字' : 'null'}, ファイル: ${file.name}, サイズ: ${file.size}bytes`);
                         } catch (e) {
                             console.warn('PDF base64変換失敗:', e);
                         }
@@ -1264,6 +1269,9 @@
                         }
 
                         const result = await evaluateApplicant(jobText, resumeText, videoData, resumePDF);
+                        if (result._debug) {
+                            console.log('[DEBUG] API応答:', JSON.stringify(result._debug));
+                        }
                         result.filename = file.name;
                         result._faceImage = faceImage;
                         allResults.push(result);
