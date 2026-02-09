@@ -12,7 +12,8 @@ async function callAnthropicWithRetry(apiKey, body, maxRetries = 3) {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25'
       },
       body: JSON.stringify(body)
     });
@@ -53,9 +54,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { jobText, resumeText, criteria, videoFrames, videoTranscript, resumeImages } = req.body;
+    const { jobText, resumeText, criteria, videoFrames, videoTranscript, resumePDF } = req.body;
 
-    if (!jobText || (!resumeText && !resumeImages)) {
+    if (!jobText || (!resumeText && !resumePDF)) {
       return res.status(400).json({ error: 'Missing jobText or resumeText' });
     }
 
@@ -84,7 +85,7 @@ module.exports = async function handler(req, res) {
     }
 
     const hasVideo = Array.isArray(videoFrames) && videoFrames.length > 0;
-    const hasResumeImages = Array.isArray(resumeImages) && resumeImages.length > 0;
+    const hasResumePDF = typeof resumePDF === 'string' && resumePDF.length > 0;
     const trimmedTranscript = videoTranscript ? truncateText(videoTranscript, 5000) : '';
 
     const videoSection = hasVideo ? `
@@ -122,11 +123,11 @@ ${trimmedJob}
 【応募者の書類（テキスト抽出分）】
 ${trimmedResume || '（テキスト抽出不可）'}
 
-${hasResumeImages ? '【重要】書類の画像も添付しています。テキスト抽出では一部のフォントが読み取れない場合があるため、必ず添付画像からも内容を直接読み取って評価してください。画像内の氏名、学歴、職歴、資格、志望動機、自己PR等のすべての記載内容を確認してください。' : ''}
+${hasResumePDF ? '【重要】応募者の書類PDFも添付しています。テキスト抽出では一部のフォントが読み取れず内容が欠落している場合があります。必ず添付PDFから直接内容を読み取って評価してください。PDF内の氏名、学歴、職歴、資格、志望動機、自己PR等のすべての記載内容を確認してください。' : ''}
 
 【注意事項】
 - 応募者によっては履歴書のみで職務経歴書がない場合があります。履歴書内の情報から最大限評価してください。
-- 「未記入」「情報不足」「白紙」と判定しないでください。書類画像がある場合は画像から直接読み取って評価してください。
+- 「未記入」「情報不足」「白紙」「空白」と判定しないでください。PDFが添付されている場合はPDFから直接読み取って評価してください。
 - テキストが少なくても、読み取れる情報から募集要件との適合性を判断してください。
 
 【評価ポイント（重要度順）】
@@ -158,21 +159,18 @@ ${videoSection}
 - C（要検討）: マッチ度40-59%、一部要件を満たす
 - D（見送り推奨）: マッチ度40%未満、要件との乖離が大きい`;
 
-    // Build content array (text + optional images)
-    const content = [{ type: 'text', text: prompt }];
+    // Build content array (text + optional PDF/images)
+    const content = [];
 
-    // Add resume page images when text extraction was insufficient
-    if (hasResumeImages) {
-      content.push({ type: 'text', text: '\n【応募者書類の画像】' });
-      const pages = resumeImages.slice(0, 5);
-      for (const page of pages) {
-        content.push({ type: 'text', text: `[${page.page || 1}ページ目]` });
-        content.push({
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/jpeg', data: page.data }
-        });
-      }
+    // Add resume PDF document for Claude to read directly
+    if (hasResumePDF) {
+      content.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: resumePDF }
+      });
     }
+
+    content.push({ type: 'text', text: prompt });
 
     if (hasVideo) {
       const frames = videoFrames.slice(0, 5);
@@ -188,10 +186,10 @@ ${videoSection}
       }
     }
 
-    const useMultimodal = hasResumeImages || hasVideo;
+    const useMultimodal = hasResumePDF || hasVideo;
     const data = await callAnthropicWithRetry(apiKey, {
       model: 'claude-sonnet-4-20250514',
-      max_tokens: (hasVideo || hasResumeImages) ? 2048 : 1024,
+      max_tokens: (hasVideo || hasResumePDF) ? 2048 : 1024,
       messages: [{ role: 'user', content: useMultimodal ? content : prompt }]
     });
 

@@ -1103,15 +1103,24 @@
             return images;
         }
 
-        async function evaluateApplicant(jobText, resumeText, videoData = null, resumeImages = null, retries = 3) {
+        async function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function evaluateApplicant(jobText, resumeText, videoData = null, resumePDF = null, retries = 3) {
             const criteria = collectCriteria();
             const body = { jobText, resumeText, criteria };
             if (videoData) {
                 body.videoFrames = videoData.frames;
                 body.videoTranscript = videoData.transcript;
             }
-            if (resumeImages) {
-                body.resumeImages = resumeImages;
+            if (resumePDF) {
+                body.resumePDF = resumePDF;
             }
             for (let attempt = 0; attempt < retries; attempt++) {
                 const response = await fetch('/api/evaluate', {
@@ -1208,13 +1217,12 @@
                             resumeText = await extractTextFromPDF(file, true);
                         }
 
-                        // 常にPDFページ画像を抽出してClaudeに送信（テキスト抽出が不完全なPDF対策）
-                        let resumeImages = null;
+                        // PDFファイルをbase64でClaudeに直接送信（フォント問題対策）
+                        let resumePDF = null;
                         try {
-                            progressText.textContent = `${file.name} のページ画像を準備中... (${i + 1}/${total})`;
-                            resumeImages = await extractPDFPageImages(file);
+                            resumePDF = await fileToBase64(file);
                         } catch (e) {
-                            console.warn('PDF画像抽出失敗:', e);
+                            console.warn('PDF base64変換失敗:', e);
                         }
 
                         // Always extract face image from resume PDF
@@ -1255,7 +1263,7 @@
                             }
                         }
 
-                        const result = await evaluateApplicant(jobText, resumeText, videoData, resumeImages);
+                        const result = await evaluateApplicant(jobText, resumeText, videoData, resumePDF);
                         result.filename = file.name;
                         result._faceImage = faceImage;
                         allResults.push(result);
