@@ -1184,29 +1184,27 @@
                             progressText.textContent = `${file.name} をOCR処理中... (${i + 1}/${total})`;
                             resumeText = await extractTextFromPDF(file, true);
                         }
-                        if (!resumeText.trim() || resumeText.trim().length < 30) {
+                        if (!resumeText.trim() || resumeText.trim().length < 10) {
                             allResults.push({ filename: file.name, error: 'PDFからテキストを抽出できませんでした（OCRも失敗）' });
                             continue;
                         }
 
+                        // Always extract face image from resume PDF
+                        let faceImage = null;
+                        try {
+                            faceImage = await extractFirstPageImage(file);
+                        } catch (e) {
+                            console.warn('PDFからの画像抽出失敗:', e);
+                        }
+
                         // Check if there's an associated video for this applicant
                         let videoData = null;
-                        let faceImage = null;
-                        let faceImageSource = null;
                         const associatedVideo = videoFiles[i]; // Match by index
                         if (associatedVideo) {
                             try {
-                                // Extract frames
                                 progressText.textContent = `${file.name} の動画フレームを抽出中... (${i + 1}/${total})`;
                                 const frames = await extractFramesFromVideo(associatedVideo.file);
 
-                                // Save first frame as face image
-                                if (frames && frames.length > 0) {
-                                    faceImage = 'data:image/jpeg;base64,' + frames[0].data;
-                                    faceImageSource = 'video';
-                                }
-
-                                // Get transcript
                                 let transcript = '';
                                 if (transcriptMode === 'manual') {
                                     transcript = manualTranscriptText;
@@ -1222,29 +1220,16 @@
                                         console.warn('書き起こしスキップ:', whisperErr);
                                     }
                                 }
-                                // transcriptMode === 'skip' の場合は transcript = '' のまま
 
                                 videoData = { frames, transcript };
                             } catch (videoError) {
                                 console.error('動画処理エラー:', videoError);
-                                // Continue evaluation without video data
-                            }
-                        }
-
-                        // If no video face image, extract from PDF first page
-                        if (!faceImage) {
-                            try {
-                                faceImage = await extractFirstPageImage(file);
-                                faceImageSource = 'pdf';
-                            } catch (e) {
-                                console.warn('PDFからの画像抽出失敗:', e);
                             }
                         }
 
                         const result = await evaluateApplicant(jobText, resumeText, videoData);
                         result.filename = file.name;
                         result._faceImage = faceImage;
-                        result._faceImageSource = faceImageSource;
                         allResults.push(result);
                     } catch (error) {
                         allResults.push({ filename: file.name, error: error.message });
@@ -1448,135 +1433,118 @@
                 const today = new Date();
                 const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
 
-                // Face image
+                // Face image (always from resume PDF)
                 const faceImg = result._faceImage;
-                const faceSource = result._faceImageSource;
-                let faceHTML = '';
-                if (faceImg && faceSource === 'video') {
-                    faceHTML = `<div style="flex-shrink:0;text-align:center;">
-                        <img src="${faceImg}" style="width:120px;height:90px;object-fit:cover;border-radius:8px;border:1px solid #ddd;" />
-                        <div style="font-size:10px;color:#999;margin-top:4px;">面接動画より</div>
-                    </div>`;
-                } else if (faceImg && faceSource === 'pdf') {
-                    faceHTML = `<div style="flex-shrink:0;text-align:center;">
-                        <img src="${faceImg}" style="width:90px;height:127px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid #ddd;" />
-                        <div style="font-size:10px;color:#999;margin-top:4px;">履歴書より</div>
-                    </div>`;
-                }
+                const faceHTML = faceImg
+                    ? `<div style="flex-shrink:0;text-align:center;">
+                        <img src="${faceImg}" style="width:80px;height:113px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid #ddd;" />
+                        <div style="font-size:9px;color:#aaa;margin-top:2px;">履歴書より</div>
+                    </div>`
+                    : '';
 
-                // Build skill/tag HTML
-                const matchingSkillsHTML = (result.matching_skills || []).map(s =>
-                    `<span style="display:inline-block;padding:3px 10px;background:#e8f5e9;color:#2e7d32;border-radius:12px;font-size:12px;margin:2px;">${s}</span>`
-                ).join('');
-                const missingSkillsHTML = (result.missing_skills || []).map(s =>
-                    `<span style="display:inline-block;padding:3px 10px;background:#fff3e0;color:#f57c00;border-radius:12px;font-size:12px;margin:2px;">${s}</span>`
-                ).join('');
-                const qualsHTML = (result.qualifications || []).map(q =>
-                    `<span style="display:inline-block;padding:3px 10px;background:#f3e5f5;color:#7b1fa2;border-radius:12px;font-size:12px;margin:2px;">${q}</span>`
-                ).join('');
-                const strengthsHTML = (result.strengths || []).map(s =>
-                    `<li style="padding:4px 0;padding-left:16px;position:relative;font-size:13px;"><span style="position:absolute;left:0;color:#4a6cf7;">&#8226;</span>${s}</li>`
-                ).join('');
-                const concernsHTML = (result.concerns || []).map(c =>
-                    `<li style="padding:4px 0;padding-left:16px;position:relative;font-size:13px;"><span style="position:absolute;left:0;color:#f57c00;">&#8226;</span>${c}</li>`
-                ).join('');
+                // Compact tag/list builders
+                const mkTag = (text, bgc, clr) => `<span style="display:inline-block;padding:2px 8px;background:${bgc};color:${clr};border-radius:10px;font-size:10px;margin:1px;">${text}</span>`;
+                const matchTags = (result.matching_skills || []).map(s => mkTag(s, '#e8f5e9', '#2e7d32')).join('');
+                const missTags = (result.missing_skills || []).map(s => mkTag(s, '#fff3e0', '#f57c00')).join('');
+                const qualTags = (result.qualifications || []).map(q => mkTag(q, '#f3e5f5', '#7b1fa2')).join('');
+                const mkLi = (text, clr) => `<li style="padding:2px 0 2px 14px;position:relative;font-size:11px;line-height:1.4;"><span style="position:absolute;left:0;color:${clr};">&#8226;</span>${text}</li>`;
+                const strengthItems = (result.strengths || []).map(s => mkLi(s, '#4a6cf7')).join('');
+                const concernItems = (result.concerns || []).map(c => mkLi(c, '#f57c00')).join('');
 
-                // Video evaluation section
-                let videoSectionHTML = '';
+                // Video evaluation (compact)
+                let videoHTML = '';
                 if (result.video_evaluation) {
                     const ve = result.video_evaluation;
-                    const scores = [
-                        { label: '身だしなみ・外見', val: parseInt(ve.appearance_score) || 0 },
-                        { label: 'コミュニケーション', val: parseInt(ve.communication_score) || 0 },
-                        { label: '態度・姿勢', val: parseInt(ve.attitude_score) || 0 },
-                        { label: '内容・論理性', val: parseInt(ve.content_score) || 0 }
+                    const vScores = [
+                        { l: '身だしなみ', v: parseInt(ve.appearance_score) || 0 },
+                        { l: 'コミュニケーション', v: parseInt(ve.communication_score) || 0 },
+                        { l: '態度・姿勢', v: parseInt(ve.attitude_score) || 0 },
+                        { l: '内容・論理性', v: parseInt(ve.content_score) || 0 }
                     ];
-                    const scoresHTML = scores.map(s => `
-                        <div style="flex:1;min-width:45%;background:white;border-radius:6px;padding:10px;border:1px solid #e8d5f5;">
-                            <div style="font-size:11px;color:#666;margin-bottom:4px;">${s.label}</div>
-                            <div style="height:5px;background:#e0d4f0;border-radius:3px;overflow:hidden;margin-bottom:3px;">
-                                <div style="height:100%;width:${(s.val/5)*100}%;background:#9c27b0;border-radius:3px;"></div>
+                    const vBars = vScores.map(s => `
+                        <div style="flex:1;min-width:22%;">
+                            <div style="font-size:9px;color:#666;">${s.l}</div>
+                            <div style="height:4px;background:#e0d4f0;border-radius:2px;overflow:hidden;margin:2px 0;">
+                                <div style="height:100%;width:${(s.v/5)*100}%;background:#9c27b0;border-radius:2px;"></div>
                             </div>
-                            <div style="font-size:12px;font-weight:700;color:#9c27b0;text-align:right;">${s.val}/5</div>
+                            <div style="font-size:10px;font-weight:700;color:#9c27b0;text-align:right;">${s.v}/5</div>
                         </div>
                     `).join('');
-                    const vsStrengths = (ve.video_strengths || []).map(s =>
-                        `<li style="padding:3px 0;padding-left:16px;position:relative;font-size:12px;"><span style="position:absolute;left:0;color:#9c27b0;">&#8226;</span>${s}</li>`
-                    ).join('');
-                    const vsConcerns = (ve.video_concerns || []).map(c =>
-                        `<li style="padding:3px 0;padding-left:16px;position:relative;font-size:12px;"><span style="position:absolute;left:0;color:#f57c00;">&#8226;</span>${c}</li>`
-                    ).join('');
-
-                    videoSectionHTML = `
-                        <div style="margin-top:20px;padding:16px;background:#faf5ff;border-radius:8px;border:1px solid #e8d5f5;">
-                            <h3 style="font-size:14px;color:#9c27b0;margin:0 0 12px 0;">&#127909; 動画評価</h3>
-                            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">${scoresHTML}</div>
-                            ${ve.overall_impression ? `<p style="font-size:13px;color:#333;padding:8px 0;margin:0;">${ve.overall_impression}</p>` : ''}
-                            ${vsStrengths ? `<div style="margin-top:8px;"><h4 style="font-size:12px;color:#666;margin:0 0 4px 0;">動画での強み</h4><ul style="list-style:none;padding:0;margin:0;">${vsStrengths}</ul></div>` : ''}
-                            ${vsConcerns ? `<div style="margin-top:8px;"><h4 style="font-size:12px;color:#666;margin:0 0 4px 0;">動画での懸念点</h4><ul style="list-style:none;padding:0;margin:0;">${vsConcerns}</ul></div>` : ''}
+                    const vsStr = (ve.video_strengths || []).slice(0, 2).map(s => mkLi(s, '#9c27b0')).join('');
+                    const vsCon = (ve.video_concerns || []).slice(0, 2).map(c => mkLi(c, '#f57c00')).join('');
+                    videoHTML = `
+                        <div style="margin-top:10px;padding:10px;background:#faf5ff;border-radius:6px;border:1px solid #e8d5f5;">
+                            <div style="font-size:11px;font-weight:700;color:#9c27b0;margin-bottom:6px;">&#127909; 動画評価</div>
+                            <div style="display:flex;gap:6px;margin-bottom:6px;">${vBars}</div>
+                            ${ve.overall_impression ? `<div style="font-size:10px;color:#555;margin-bottom:4px;">${ve.overall_impression}</div>` : ''}
+                            <div style="display:flex;gap:12px;">
+                                ${vsStr ? `<div style="flex:1;"><div style="font-size:9px;color:#666;margin-bottom:2px;">強み</div><ul style="list-style:none;padding:0;margin:0;">${vsStr}</ul></div>` : ''}
+                                ${vsCon ? `<div style="flex:1;"><div style="font-size:9px;color:#666;margin-bottom:2px;">懸念点</div><ul style="list-style:none;padding:0;margin:0;">${vsCon}</ul></div>` : ''}
+                            </div>
                         </div>
                     `;
                 }
 
                 const reportHTML = `
-                    <div style="border-bottom:3px solid #4a6cf7;padding-bottom:16px;margin-bottom:24px;">
-                        <h1 style="font-size:22px;color:#1a1a2e;margin:0;">応募者評価レポート</h1>
-                        <p style="color:#999;font-size:12px;margin:4px 0 0 0;">生成日: ${dateStr}</p>
+                    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #4a6cf7;padding-bottom:8px;margin-bottom:14px;">
+                        <h1 style="font-size:18px;color:#1a1a2e;margin:0;">応募者評価レポート</h1>
+                        <span style="font-size:10px;color:#999;">${dateStr}</span>
                     </div>
-                    <div style="display:flex;gap:20px;margin-bottom:24px;">
+                    <div style="display:flex;gap:14px;margin-bottom:14px;">
                         ${faceHTML}
                         <div style="flex:1;">
-                            <h2 style="font-size:20px;color:#1a1a2e;margin:0 0 8px 0;">${result.name || '不明'}</h2>
-                            <p style="font-size:12px;color:#999;margin:0 0 12px 0;">ファイル: ${result.filename}</p>
-                            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                                <span style="display:inline-block;padding:6px 16px;background:${bg};color:${color};border-radius:6px;font-weight:700;font-size:18px;">${rec} ${recLabels[rec]}</span>
-                                <span style="font-size:20px;font-weight:700;color:#333;">${result.score}点</span>
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                                <h2 style="font-size:17px;color:#1a1a2e;margin:0;">${result.name || '不明'}</h2>
+                                <span style="font-size:10px;color:#999;">${result.filename}</span>
                             </div>
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <span style="font-size:13px;color:#666;">マッチ度:</span>
-                                <div style="flex:1;max-width:200px;height:8px;background:#e0e0e0;border-radius:4px;overflow:hidden;">
-                                    <div style="height:100%;width:${result.match_rate || 0}%;background:${color};border-radius:4px;"></div>
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                                <span style="display:inline-block;padding:4px 12px;background:${bg};color:${color};border-radius:4px;font-weight:700;font-size:15px;">${rec} ${recLabels[rec]}</span>
+                                <span style="font-size:18px;font-weight:700;color:#333;">${result.score}点</span>
+                                <span style="font-size:12px;color:#666;">経験: ${result.experience_years || '不明'}</span>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <span style="font-size:11px;color:#666;">マッチ度</span>
+                                <div style="flex:1;max-width:180px;height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;">
+                                    <div style="height:100%;width:${result.match_rate || 0}%;background:${color};border-radius:3px;"></div>
                                 </div>
-                                <span style="font-size:14px;font-weight:600;color:${color};">${result.match_rate || 0}%</span>
+                                <span style="font-size:12px;font-weight:600;color:${color};">${result.match_rate || 0}%</span>
                             </div>
+                            <div style="margin-top:6px;padding:8px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#333;">${result.summary || '-'}</div>
                         </div>
                     </div>
-                    <div style="padding:14px;background:#f8f9fa;border-radius:8px;margin-bottom:20px;font-size:14px;color:#333;">
-                        ${result.summary || '-'}
+                    <div style="display:flex;gap:12px;margin-bottom:10px;">
+                        <div style="flex:1;">
+                            <div style="font-size:10px;font-weight:600;color:#2e7d32;margin-bottom:4px;">&#9632; マッチスキル</div>
+                            <div>${matchTags || '<span style="font-size:10px;color:#999;">なし</span>'}</div>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:10px;font-weight:600;color:#f57c00;margin-bottom:4px;">&#9632; 不足スキル</div>
+                            <div>${missTags || '<span style="font-size:10px;color:#999;">なし</span>'}</div>
+                        </div>
                     </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 関連経験</h3>
-                        <p style="font-size:14px;margin:0;">${result.experience_years || '不明'}</p>
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:10px;font-weight:600;color:#7b1fa2;margin-bottom:4px;">&#9632; 保有資格</div>
+                        <div>${qualTags || '<span style="font-size:10px;color:#999;">なし</span>'}</div>
                     </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; マッチしているスキル</h3>
-                        <div>${matchingSkillsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
+                    <div style="display:flex;gap:12px;margin-bottom:8px;">
+                        <div style="flex:1;">
+                            <div style="font-size:10px;font-weight:600;color:#4a6cf7;margin-bottom:4px;">&#9632; 強み</div>
+                            <ul style="list-style:none;padding:0;margin:0;">${strengthItems || '<li style="font-size:10px;color:#999;">なし</li>'}</ul>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:10px;font-weight:600;color:#f57c00;margin-bottom:4px;">&#9632; 懸念点</div>
+                            <ul style="list-style:none;padding:0;margin:0;">${concernItems || '<li style="font-size:10px;color:#999;">なし</li>'}</ul>
+                        </div>
                     </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 不足しているスキル</h3>
-                        <div>${missingSkillsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
-                    </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 保有資格</h3>
-                        <div>${qualsHTML || '<p style="font-size:13px;color:#999;margin:0;">なし</p>'}</div>
-                    </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; この募集に対する強み</h3>
-                        <ul style="list-style:none;padding:0;margin:0;">${strengthsHTML || '<li style="font-size:13px;color:#999;">なし</li>'}</ul>
-                    </div>
-                    <div style="margin-bottom:16px;">
-                        <h3 style="font-size:13px;color:#666;margin:0 0 8px 0;letter-spacing:0.5px;">&#9632; 懸念点</h3>
-                        <ul style="list-style:none;padding:0;margin:0;">${concernsHTML || '<li style="font-size:13px;color:#999;">なし</li>'}</ul>
-                    </div>
-                    ${videoSectionHTML}
-                    <div style="margin-top:30px;padding-top:16px;border-top:1px solid #eee;text-align:center;font-size:11px;color:#999;">
+                    ${videoHTML}
+                    <div style="margin-top:12px;padding-top:6px;border-top:1px solid #eee;text-align:center;font-size:9px;color:#bbb;">
                         応募者評価ツール - Powered by Claude AI
                     </div>
                 `;
 
-                // Create hidden container and render
+                // Render at compact size to fit one A4 page
                 const container = document.createElement('div');
-                container.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;padding:40px;background:white;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#333;line-height:1.6;';
+                container.style.cssText = 'position:fixed;left:-9999px;top:0;width:680px;padding:28px 32px;background:white;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#333;line-height:1.5;';
                 container.innerHTML = reportHTML;
                 document.body.appendChild(container);
 
@@ -1589,19 +1557,15 @@
                 const pageHeight = 297;
                 const imgWidth = pageWidth;
                 const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
-                let heightLeft = imgHeight;
-                let position = 0;
-
-                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-                heightLeft -= pageHeight;
-
-                while (heightLeft > 0) {
-                    position -= pageHeight;
-                    pdf.addPage();
-                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-                    heightLeft -= pageHeight;
+                // Scale to fit within one page
+                if (imgHeight <= pageHeight) {
+                    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, imgHeight);
+                } else {
+                    const scale = pageHeight / imgHeight;
+                    const scaledWidth = imgWidth * scale;
+                    const offsetX = (pageWidth - scaledWidth) / 2;
+                    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', offsetX, 0, scaledWidth, pageHeight);
                 }
 
                 const name = result.name || '不明';
