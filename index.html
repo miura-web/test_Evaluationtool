@@ -1033,68 +1033,6 @@
             return text;
         }
 
-        async function extractFacePhoto(file) {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: PDFJS_CMAP_URL, cMapPacked: PDFJS_CMAP_PACKED }).promise;
-            const page = await pdf.getPage(1);
-            const scale = 3.0;
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            await page.render({ canvasContext: ctx, viewport }).promise;
-
-            // FaceDetector API（Chrome/Edge）で顔検出を試行
-            if ('FaceDetector' in window) {
-                try {
-                    const detector = new FaceDetector({ fastMode: false, maxDetectedFaces: 5 });
-                    const faces = await detector.detect(canvas);
-                    if (faces.length > 0) {
-                        let best = faces[0];
-                        for (const face of faces) {
-                            if (face.boundingBox.width * face.boundingBox.height >
-                                best.boundingBox.width * best.boundingBox.height) {
-                                best = face;
-                            }
-                        }
-                        const { x, y, width, height } = best.boundingBox;
-                        // 顔中心を基準に3:4のパスポート写真風にクロップ
-                        const faceCX = x + width / 2;
-                        const faceCY = y + height / 2;
-                        const targetW = width / 0.55;
-                        const targetH = targetW * (4 / 3);
-                        const cropX = Math.max(0, Math.round(faceCX - targetW / 2));
-                        const cropY = Math.max(0, Math.round(faceCY - targetH * 0.38));
-                        const cropW = Math.min(canvas.width - cropX, Math.round(targetW));
-                        const cropH = Math.min(canvas.height - cropY, Math.round(targetH));
-
-                        const faceCanvas = document.createElement('canvas');
-                        faceCanvas.width = cropW;
-                        faceCanvas.height = cropH;
-                        faceCanvas.getContext('2d').drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-                        console.log('[DEBUG] FaceDetectorで顔検出成功');
-                        return faceCanvas.toDataURL('image/jpeg', 0.9);
-                    }
-                } catch (e) {
-                    console.warn('FaceDetector失敗:', e);
-                }
-            }
-
-            // フォールバック: 日本の履歴書の標準的な写真位置（右上エリア）をクロップ
-            const photoX = Math.round(canvas.width * 0.76);
-            const photoY = Math.round(canvas.height * 0.06);
-            const photoW = Math.round(canvas.width * 0.18);
-            const photoH = Math.round(photoW * (4 / 3));
-
-            const faceCanvas = document.createElement('canvas');
-            faceCanvas.width = photoW;
-            faceCanvas.height = photoH;
-            faceCanvas.getContext('2d').drawImage(canvas, photoX, photoY, photoW, photoH, 0, 0, photoW, photoH);
-            console.log('[DEBUG] フォールバック: 固定位置から写真クロップ');
-            return faceCanvas.toDataURL('image/jpeg', 0.9);
-        }
-
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
@@ -1279,14 +1217,6 @@
                             console.warn('PDF base64変換失敗:', e);
                         }
 
-                        // Always extract face image from resume PDF
-                        let faceImage = null;
-                        try {
-                            faceImage = await extractFacePhoto(file);
-                        } catch (e) {
-                            console.warn('PDFからの画像抽出失敗:', e);
-                        }
-
                         // Check if there's an associated video for this applicant
                         let videoData = null;
                         const associatedVideo = videoFiles[i]; // Match by index
@@ -1322,7 +1252,6 @@
                             console.log('[DEBUG] API応答:', JSON.stringify(result._debug));
                         }
                         result.filename = file.name;
-                        result._faceImage = faceImage;
                         allResults.push(result);
                     } catch (error) {
                         allResults.push({ filename: file.name, error: error.message });
@@ -1526,14 +1455,6 @@
                 const today = new Date();
                 const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
 
-                // Face image (always from resume PDF)
-                const faceImg = result._faceImage;
-                const faceHTML = faceImg
-                    ? `<div style="flex-shrink:0;text-align:center;">
-                        <img src="${faceImg}" style="width:85px;height:113px;object-fit:cover;object-position:center;border-radius:4px;border:1px solid #ddd;" />
-                    </div>`
-                    : '';
-
                 // Compact tag/list builders
                 const mkTag = (text, bgc, clr) => `<span style="display:inline-block;padding:2px 8px;background:${bgc};color:${clr};border-radius:10px;font-size:10px;margin:1px;">${text}</span>`;
                 const matchTags = (result.matching_skills || []).map(s => mkTag(s, '#e8f5e9', '#2e7d32')).join('');
@@ -1582,9 +1503,8 @@
                         <h1 style="font-size:18px;color:#1a1a2e;margin:0;">応募者評価レポート</h1>
                         <span style="font-size:10px;color:#999;">${dateStr}</span>
                     </div>
-                    <div style="display:flex;gap:14px;margin-bottom:14px;">
-                        ${faceHTML}
-                        <div style="flex:1;">
+                    <div style="margin-bottom:14px;">
+                        <div>
                             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
                                 <h2 style="font-size:17px;color:#1a1a2e;margin:0;">${result.name || '不明'}</h2>
                                 <span style="font-size:10px;color:#999;">${result.filename}</span>
