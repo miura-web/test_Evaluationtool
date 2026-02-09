@@ -1084,12 +1084,34 @@
             });
         }
 
-        async function evaluateApplicant(jobText, resumeText, videoData = null, retries = 3) {
+        async function extractPDFPageImages(file, maxPages = 3) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pages = Math.min(pdf.numPages, maxPages);
+            const images = [];
+            for (let i = 1; i <= pages; i++) {
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale: 1.5 });
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                images.push({ page: i, data: dataUrl.split(',')[1] });
+            }
+            return images;
+        }
+
+        async function evaluateApplicant(jobText, resumeText, videoData = null, resumeImages = null, retries = 3) {
             const criteria = collectCriteria();
             const body = { jobText, resumeText, criteria };
             if (videoData) {
                 body.videoFrames = videoData.frames;
                 body.videoTranscript = videoData.transcript;
+            }
+            if (resumeImages) {
+                body.resumeImages = resumeImages;
             }
             for (let attempt = 0; attempt < retries; attempt++) {
                 const response = await fetch('/api/evaluate', {
@@ -1180,12 +1202,26 @@
 
                     try {
                         let resumeText = await extractTextFromPDF(file);
+                        let resumeImages = null;
+
                         if (!resumeText.trim() || resumeText.trim().length < 50) {
                             progressText.textContent = `${file.name} をOCR処理中... (${i + 1}/${total})`;
                             resumeText = await extractTextFromPDF(file, true);
                         }
-                        if (!resumeText.trim() || resumeText.trim().length < 10) {
-                            allResults.push({ filename: file.name, error: 'PDFからテキストを抽出できませんでした（OCRも失敗）' });
+
+                        // テキスト抽出が不十分な場合、PDFページ画像をClaudeに直接送信
+                        if (!resumeText.trim() || resumeText.trim().length < 100) {
+                            try {
+                                progressText.textContent = `${file.name} のページ画像を抽出中... (${i + 1}/${total})`;
+                                resumeImages = await extractPDFPageImages(file);
+                            } catch (e) {
+                                console.warn('PDF画像抽出失敗:', e);
+                            }
+                        }
+
+                        // テキストも画像もない場合のみエラー
+                        if ((!resumeText.trim() || resumeText.trim().length < 10) && !resumeImages) {
+                            allResults.push({ filename: file.name, error: 'PDFからテキストを抽出できませんでした' });
                             continue;
                         }
 
@@ -1227,7 +1263,7 @@
                             }
                         }
 
-                        const result = await evaluateApplicant(jobText, resumeText, videoData);
+                        const result = await evaluateApplicant(jobText, resumeText, videoData, resumeImages);
                         result.filename = file.name;
                         result._faceImage = faceImage;
                         allResults.push(result);

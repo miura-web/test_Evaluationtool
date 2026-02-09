@@ -53,9 +53,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { jobText, resumeText, criteria, videoFrames, videoTranscript } = req.body;
+    const { jobText, resumeText, criteria, videoFrames, videoTranscript, resumeImages } = req.body;
 
-    if (!jobText || !resumeText) {
+    if (!jobText || (!resumeText && !resumeImages)) {
       return res.status(400).json({ error: 'Missing jobText or resumeText' });
     }
 
@@ -84,6 +84,7 @@ module.exports = async function handler(req, res) {
     }
 
     const hasVideo = Array.isArray(videoFrames) && videoFrames.length > 0;
+    const hasResumeImages = Array.isArray(resumeImages) && resumeImages.length > 0;
     const trimmedTranscript = videoTranscript ? truncateText(videoTranscript, 5000) : '';
 
     const videoSection = hasVideo ? `
@@ -119,12 +120,14 @@ ${trimmedTranscript ? `[書き起こし]\n${trimmedTranscript}\n` : ''}
 ${trimmedJob}
 
 【応募者の書類】
-${trimmedResume}
+${trimmedResume || '（テキスト抽出不可 - 添付の書類画像を参照してください）'}
+${hasResumeImages ? '\n※テキスト抽出が不十分なため、以下に添付された書類画像から直接内容を読み取って評価してください。画像内のすべてのテキスト（氏名、職歴、志望動機、資格、学歴など）を読み取ってください。' : ''}
 
 【重要な注意事項】
 - 応募者によっては履歴書のみで職務経歴書がない場合があります。
 - 職務経歴書がなくても、履歴書内の職歴欄、志望動機、自己PR、保有資格、学歴などの情報から最大限評価してください。
-- 情報が少ない場合でも「未記入」「情報不足」とせず、読み取れる情報を元に可能な範囲で評価を行ってください。
+- 情報が少ない場合でも「未記入」「情報不足」「白紙」とせず、読み取れる情報を元に可能な範囲で評価を行ってください。
+- 書類画像が添付されている場合は、画像から直接テキストを読み取って評価してください。
 - テキストが少なくても、そこから読み取れるスキルや経験を推測し、募集要件との適合性を判断してください。
 
 【評価ポイント（重要度順）】
@@ -158,6 +161,20 @@ ${videoSection}
 
     // Build content array (text + optional images)
     const content = [{ type: 'text', text: prompt }];
+
+    // Add resume page images when text extraction was insufficient
+    if (hasResumeImages) {
+      content.push({ type: 'text', text: '\n【応募者書類の画像】' });
+      const pages = resumeImages.slice(0, 5);
+      for (const page of pages) {
+        content.push({ type: 'text', text: `[${page.page || 1}ページ目]` });
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: page.data }
+        });
+      }
+    }
+
     if (hasVideo) {
       const frames = videoFrames.slice(0, 5);
       for (const frame of frames) {
@@ -172,10 +189,11 @@ ${videoSection}
       }
     }
 
+    const useMultimodal = hasResumeImages || hasVideo;
     const data = await callAnthropicWithRetry(apiKey, {
       model: 'claude-sonnet-4-20250514',
-      max_tokens: hasVideo ? 2048 : 1024,
-      messages: [{ role: 'user', content: hasVideo ? content : prompt }]
+      max_tokens: (hasVideo || hasResumeImages) ? 2048 : 1024,
+      messages: [{ role: 'user', content: useMultimodal ? content : prompt }]
     });
 
     const text = data.content[0].text;
