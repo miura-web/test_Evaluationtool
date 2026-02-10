@@ -1154,6 +1154,89 @@
             return images;
         }
 
+        async function createVideoPreview(videoFile, maxDurationSec) {
+            maxDurationSec = maxDurationSec || 15;
+            return new Promise((resolve, reject) => {
+                const video = document.createElement('video');
+                video.playsInline = true;
+                video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+                document.body.appendChild(video);
+
+                const cleanup = () => {
+                    video.pause();
+                    video.remove();
+                    URL.revokeObjectURL(video.src);
+                };
+
+                video.onloadedmetadata = () => {
+                    try {
+                        const duration = Math.min(video.duration, maxDurationSec);
+                        const scale = Math.min(1, 480 / Math.max(video.videoHeight, 1));
+                        const width = Math.round(video.videoWidth * scale) || 640;
+                        const height = Math.round(video.videoHeight * scale) || 480;
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+
+                        const canvasStream = canvas.captureStream(15);
+
+                        try {
+                            const audioCtx = new AudioContext();
+                            const source = audioCtx.createMediaElementSource(video);
+                            const dest = audioCtx.createMediaStreamDestination();
+                            source.connect(dest);
+                            dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+                        } catch(e) {
+                            console.log('[Preview] Audio capture skipped:', e.message);
+                        }
+
+                        let mimeType = 'video/webm;codecs=vp8,opus';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {
+                            mimeType = MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : 'video/mp4';
+                        }
+
+                        const recorder = new MediaRecorder(canvasStream, {
+                            mimeType,
+                            videoBitsPerSecond: 500000
+                        });
+
+                        const chunks = [];
+                        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+                        recorder.onstop = () => {
+                            cleanup();
+                            const ext = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
+                            const blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+                            blob.name = (videoFile.name || 'video').replace(/\.\w+$/, '') + '_preview.' + ext;
+                            resolve(blob);
+                        };
+
+                        video.currentTime = 0;
+                        video.play().then(() => {
+                            recorder.start(1000);
+                            const drawFrame = () => {
+                                if (video.currentTime >= duration || video.ended) {
+                                    if (recorder.state === 'recording') recorder.stop();
+                                    return;
+                                }
+                                ctx.drawImage(video, 0, 0, width, height);
+                                requestAnimationFrame(drawFrame);
+                            };
+                            drawFrame();
+                            setTimeout(() => {
+                                if (recorder.state === 'recording') recorder.stop();
+                            }, duration * 1000 + 1000);
+                        }).catch(err => { cleanup(); reject(err); });
+                    } catch(e) { cleanup(); reject(e); }
+                };
+
+                video.onerror = () => { cleanup(); reject(new Error('Video load failed')); };
+                video.src = URL.createObjectURL(videoFile);
+            });
+        }
+
         async function fileToBase64(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -1746,19 +1829,31 @@
                     } catch (e) { console.error('[Share] PDFアップロード例外:', e); }
                 }
 
-                // 動画ファイルもアップロード（7MB以下のみ）
+                // 動画ファイルもアップロード（大きい場合はプレビュークリップを作成）
                 if (blobAvailable) {
                     for (const result of allResults) {
                         if (!result._videoFile || result.error) continue;
-                        if (result._videoFile.size > 7 * 1024 * 1024) { console.log('[Share] 動画スキップ(大):', result._videoFile.name); continue; }
-                        shareBtn.textContent = `アップロード中... ${result._videoFile.name}`;
                         try {
-                            const base64 = await fileToBase64(result._videoFile);
-                            console.log('[Share] 動画アップロード:', result._videoFile.name, 'size=' + base64.length);
+                            let videoBlob = result._videoFile;
+                            let videoContentType = result._videoFile.type || 'video/mp4';
+                            let videoName = result._videoFile.name;
+
+                            if (videoBlob.size > 5 * 1024 * 1024) {
+                                shareBtn.textContent = `動画プレビュー作成中... ${videoName}`;
+                                console.log('[Share] 動画プレビュー作成開始:', videoName, 'original=' + videoBlob.size);
+                                videoBlob = await createVideoPreview(result._videoFile, 15);
+                                videoContentType = videoBlob.type || 'video/webm';
+                                videoName = videoBlob.name || videoName.replace(/\.\w+$/, '_preview.webm');
+                                console.log('[Share] プレビュー作成完了:', videoName, 'size=' + videoBlob.size);
+                            }
+
+                            shareBtn.textContent = `アップロード中... ${videoName}`;
+                            const base64 = await fileToBase64(videoBlob);
+                            console.log('[Share] 動画アップロード:', videoName, 'size=' + base64.length);
                             const resp = await fetch('/api/share-upload', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ filename: result._videoFile.name, data: base64, contentType: result._videoFile.type || 'video/mp4' })
+                                body: JSON.stringify({ filename: videoName, data: base64, contentType: videoContentType })
                             });
                             const data = await resp.json();
                             console.log('[Share] 動画アップロード結果:', JSON.stringify(data));
