@@ -720,7 +720,7 @@
                     <input type="text" id="shareUrlInput" class="share-url-input" readonly />
                     <button class="copy-btn" id="copyBtn" onclick="copyShareLink()">コピー</button>
                 </div>
-                <p style="font-size:0.75rem;color:#999;margin-top:10px;">※ データはURL内に圧縮して格納されます。別途サーバーには保存されません。</p>
+                <p id="shareNote" style="font-size:0.75rem;color:#999;margin-top:10px;"></p>
             </div>
         </div>
 
@@ -1499,10 +1499,8 @@
                 <div class="detail-section">
                     <h3>添付データ</h3>
                     <div class="attachment-section">
-                        ${result._file ? `<button class="attachment-btn" onclick="viewResumePDF(${idx})"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></button>` : ''}
-                        ${!result._file && result._downloadUrl ? `<a class="attachment-btn" href="${result._downloadUrl}" target="_blank" style="text-decoration:none;color:#333;"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></a>` : ''}
-                        ${result._videoFile ? `<button class="attachment-btn" onclick="viewVideo(${idx})"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result._videoFile.name}</div></div></button>` : ''}
-                        ${!result._videoFile && result._videoDownloadUrl ? `<a class="attachment-btn" href="${result._videoDownloadUrl}" target="_blank" style="text-decoration:none;color:#333;"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result.videoFilename || '動画'}</div></div></a>` : ''}
+                        ${(result._file || result._downloadUrl) ? `<button class="attachment-btn" onclick="viewResumePDF(${idx})"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></button>` : ''}
+                        ${(result._videoFile || result._videoDownloadUrl) ? `<button class="attachment-btn" onclick="viewVideo(${idx})"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result._videoFile ? result._videoFile.name : (result.videoFilename || '動画')}</div></div></button>` : ''}
                     </div>
                 </div>
                 ` : ''}
@@ -1513,18 +1511,30 @@
 
         function viewResumePDF(idx) {
             const result = allResults.sort((a, b) => (b.score || 0) - (a.score || 0))[idx];
-            if (!result || !result._file) return;
-            const url = URL.createObjectURL(result._file);
-            window.open(url, '_blank');
+            if (!result) return;
+            if (result._file) {
+                const url = URL.createObjectURL(result._file);
+                window.open(url, '_blank');
+            } else if (result._downloadUrl) {
+                window.open(result._downloadUrl, '_blank');
+            }
         }
 
         function viewVideo(idx) {
             const result = allResults.sort((a, b) => (b.score || 0) - (a.score || 0))[idx];
-            if (!result || !result._videoFile) return;
-            const url = URL.createObjectURL(result._videoFile);
-            // 動画プレーヤーモーダル
+            if (!result) return;
+            let videoUrl, videoName;
+            if (result._videoFile) {
+                videoUrl = URL.createObjectURL(result._videoFile);
+                videoName = result._videoFile.name;
+            } else if (result._videoDownloadUrl) {
+                videoUrl = result._videoDownloadUrl;
+                videoName = result.videoFilename || '動画';
+            } else {
+                return;
+            }
             const vw = window.open('', '_blank');
-            vw.document.write(`<!DOCTYPE html><html><head><title>${result._videoFile.name}</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}video{max-width:100%;max-height:100%;}</style></head><body><video src="${url}" controls autoplay></video></body></html>`);
+            vw.document.write(`<!DOCTYPE html><html><head><title>${videoName}</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}video{max-width:100%;max-height:100%;}</style></head><body><video src="${videoUrl}" controls autoplay></video></body></html>`);
         }
 
         async function generatePDFReport(idx) {
@@ -1715,41 +1725,49 @@
                 // ファイルをVercel Blobにアップロード
                 const fileUrls = {};
                 let blobAvailable = true;
+                console.log('[Share] 開始: allResults数=' + allResults.length);
 
                 for (const result of allResults) {
                     if (!result._file || result.error) continue;
                     shareBtn.textContent = `アップロード中... ${result.filename}`;
                     try {
                         const base64 = await fileToBase64(result._file);
+                        console.log('[Share] PDFアップロード:', result.filename, 'size=' + base64.length);
                         const resp = await fetch('/api/share-upload', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ filename: result.filename, data: base64, contentType: 'application/pdf' })
                         });
                         const data = await resp.json();
+                        console.log('[Share] PDFアップロード結果:', JSON.stringify(data));
                         if (data.error === 'BLOB_NOT_CONFIGURED') { blobAvailable = false; break; }
+                        if (data.error) { console.error('[Share] PDFアップロードエラー:', data.error); }
                         if (data.url) fileUrls[result.filename] = data.url;
-                    } catch (e) { console.warn('PDFアップロードスキップ:', e); }
+                    } catch (e) { console.error('[Share] PDFアップロード例外:', e); }
                 }
 
                 // 動画ファイルもアップロード（7MB以下のみ）
                 if (blobAvailable) {
                     for (const result of allResults) {
                         if (!result._videoFile || result.error) continue;
-                        if (result._videoFile.size > 7 * 1024 * 1024) { console.log('動画が大きすぎるためスキップ:', result._videoFile.name); continue; }
+                        if (result._videoFile.size > 7 * 1024 * 1024) { console.log('[Share] 動画スキップ(大):', result._videoFile.name); continue; }
                         shareBtn.textContent = `アップロード中... ${result._videoFile.name}`;
                         try {
                             const base64 = await fileToBase64(result._videoFile);
+                            console.log('[Share] 動画アップロード:', result._videoFile.name, 'size=' + base64.length);
                             const resp = await fetch('/api/share-upload', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ filename: result._videoFile.name, data: base64, contentType: result._videoFile.type || 'video/mp4' })
                             });
                             const data = await resp.json();
+                            console.log('[Share] 動画アップロード結果:', JSON.stringify(data));
                             if (data.url) fileUrls[result.videoFilename || result._videoFile.name] = data.url;
-                        } catch (e) { console.warn('動画アップロードスキップ:', e); }
+                        } catch (e) { console.error('[Share] 動画アップロード例外:', e); }
                     }
                 }
+
+                console.log('[Share] blobAvailable=' + blobAvailable, 'fileUrls=', fileUrls);
 
                 // 結果データを整理
                 const cleanResults = allResults.map(r => {
@@ -1763,22 +1781,32 @@
                 if (blobAvailable) {
                     // Blob方式: 共有データJSONをBlobに保存
                     shareBtn.textContent = '共有リンク生成中...';
-                    const resp = await fetch('/api/share-create', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            results: cleanResults, fileUrls,
-                            title: document.getElementById('jobSummaryText').textContent || '',
-                            date: new Date().toLocaleDateString('ja-JP')
-                        })
-                    });
-                    const data = await resp.json();
-                    if (data.shareUrl) {
-                        shareLink = location.origin + location.pathname + '#s=' + encodeURIComponent(data.shareUrl);
+                    try {
+                        const resp = await fetch('/api/share-create', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                results: cleanResults, fileUrls,
+                                title: document.getElementById('jobSummaryText').textContent || '',
+                                date: new Date().toLocaleDateString('ja-JP')
+                            })
+                        });
+                        const data = await resp.json();
+                        console.log('[Share] share-create結果:', JSON.stringify(data).slice(0, 200));
+                        if (data.shortId) {
+                            shareLink = location.origin + location.pathname + '#s=' + data.shortId;
+                        } else if (data.shareUrl) {
+                            shareLink = location.origin + location.pathname + '#s=' + encodeURIComponent(data.shareUrl);
+                        } else {
+                            console.error('[Share] share-createにshareUrlなし:', data);
+                        }
+                    } catch (e) {
+                        console.error('[Share] share-create例外:', e);
                     }
                 }
 
                 if (!shareLink) {
+                    console.warn('[Share] Blobフォールバック → URLハッシュ方式');
                     // フォールバック: URLハッシュ圧縮方式（ファイルなし）
                     const shareData = {
                         results: cleanResults,
@@ -1788,6 +1816,8 @@
                     const json = JSON.stringify(shareData);
                     const compressed = pako.deflate(new TextEncoder().encode(json));
                     shareLink = location.origin + location.pathname + '#share=' + toBase64Url(compressed);
+                } else {
+                    console.log('[Share] Blob方式成功');
                 }
 
                 document.getElementById('shareUrlInput').value = shareLink;
@@ -1831,13 +1861,27 @@
 
         function loadSharedResults() {
             const hash = location.hash;
-            // Blob方式
             if (hash.startsWith('#s=')) {
-                const shareUrl = decodeURIComponent(hash.slice(3));
-                fetch(shareUrl)
-                    .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+                const value = decodeURIComponent(hash.slice(3));
+                let fetchPromise;
+                if (/^[a-f0-9]{8}$/.test(value)) {
+                    // 短縮ID方式: APIで解決
+                    fetchPromise = fetch('/api/share-get?id=' + value)
+                        .then(r => { if (!r.ok) throw new Error('Share not found'); return r.json(); });
+                } else {
+                    // レガシー: フルURL方式
+                    fetchPromise = fetch(value)
+                        .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); });
+                }
+                fetchPromise
                     .then(shareData => enterSharedMode(shareData))
-                    .catch(e => console.error('共有データの読み込みに失敗:', e));
+                    .catch(e => {
+                        console.error('共有データの読み込みに失敗:', e);
+                        document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn').forEach(el => el.style.display = 'none');
+                        document.getElementById('sharedBanner').style.display = 'block';
+                        document.getElementById('sharedTitle').textContent = '共有データの読み込みに失敗しました';
+                        document.getElementById('sharedDate').textContent = 'リンクが無効か、データが期限切れの可能性があります';
+                    });
                 return;
             }
             // レガシー: URLハッシュ圧縮方式

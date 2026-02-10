@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -17,15 +19,16 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Missing results' });
     }
 
+    const shortId = crypto.randomBytes(4).toString('hex');
     const shareData = JSON.stringify({ results, fileUrls: fileUrls || {}, title, date });
 
-    const blobRes = await fetch('https://blob.vercel-storage.com/share-data.json', {
+    const blobRes = await fetch(`https://blob.vercel-storage.com/s/${shortId}.json`, {
       method: 'PUT',
       headers: {
         'authorization': `Bearer ${token}`,
         'x-api-version': '7',
         'x-content-type': 'application/json',
-        'x-add-random-suffix': '1',
+        'x-add-random-suffix': '0',
         'Content-Type': 'application/octet-stream',
       },
       body: shareData,
@@ -37,7 +40,7 @@ module.exports = async function handler(req, res) {
     }
 
     const blob = await blobRes.json();
-    return res.status(200).json({ shareUrl: blob.url });
+    return res.status(200).json({ shortId, shareUrl: blob.url });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
