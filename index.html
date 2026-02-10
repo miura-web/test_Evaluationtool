@@ -711,6 +711,11 @@
             </div>
         </div>
 
+        <div id="videoOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.92);align-items:center;justify-content:center;cursor:pointer;" onclick="if(event.target===this)closeVideoOverlay()">
+            <button onclick="closeVideoOverlay()" style="position:absolute;top:16px;right:24px;background:none;border:none;color:#fff;font-size:2rem;cursor:pointer;z-index:10001;">&times;</button>
+            <video id="overlayVideo" controls autoplay style="max-width:90%;max-height:85vh;border-radius:8px;"></video>
+        </div>
+
         <div id="shareModal" class="modal">
             <div class="modal-content" style="max-width:520px;">
                 <span class="close-btn" onclick="document.getElementById('shareModal').style.display='none'">&times;</span>
@@ -1606,18 +1611,26 @@
         function viewVideo(idx) {
             const result = allResults.sort((a, b) => (b.score || 0) - (a.score || 0))[idx];
             if (!result) return;
-            let videoUrl, videoName;
+            let videoUrl;
             if (result._videoFile) {
                 videoUrl = URL.createObjectURL(result._videoFile);
-                videoName = result._videoFile.name;
             } else if (result._videoDownloadUrl) {
                 videoUrl = result._videoDownloadUrl;
-                videoName = result.videoFilename || '動画';
             } else {
                 return;
             }
-            const vw = window.open('', '_blank');
-            vw.document.write(`<!DOCTYPE html><html><head><title>${videoName}</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}video{max-width:100%;max-height:100%;}</style></head><body><video src="${videoUrl}" controls autoplay></video></body></html>`);
+            const overlay = document.getElementById('videoOverlay');
+            const video = document.getElementById('overlayVideo');
+            video.src = videoUrl;
+            overlay.style.display = 'flex';
+        }
+
+        function closeVideoOverlay() {
+            const overlay = document.getElementById('videoOverlay');
+            const video = document.getElementById('overlayVideo');
+            video.pause();
+            video.src = '';
+            overlay.style.display = 'none';
         }
 
         async function generatePDFReport(idx) {
