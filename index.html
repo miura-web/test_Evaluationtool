@@ -1959,7 +1959,7 @@
                 if (fileUrls[r.filename]) r._downloadUrl = fileUrls[r.filename];
                 if (r.videoFilename && fileUrls[r.videoFilename]) r._videoDownloadUrl = fileUrls[r.videoFilename];
             });
-            document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn, .progress-section').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn, .progress-section, .btn-hint').forEach(el => el.style.display = 'none');
             document.getElementById('sharedBanner').style.display = 'block';
             document.getElementById('sharedTitle').textContent = shareData.title ? '共有: ' + shareData.title : '共有された評価結果';
             document.getElementById('sharedDate').textContent = shareData.date ? '評価日: ' + shareData.date : '';
