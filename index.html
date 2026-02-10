@@ -1313,7 +1313,10 @@
                         }
                         result.filename = file.name;
                         result._file = file;
-                        if (associatedVideo) result._videoFile = associatedVideo.file;
+                        if (associatedVideo) {
+                            result._videoFile = associatedVideo.file;
+                            result.videoFilename = associatedVideo.file.name;
+                        }
                         allResults.push(result);
                     } catch (error) {
                         allResults.push({ filename: file.name, error: error.message });
@@ -1492,12 +1495,14 @@
                     <ul class="concerns">${concerns || '<li>なし</li>'}</ul>
                 </div>
                 ${videoEvalHTML}
-                ${result._file || result._videoFile ? `
+                ${(result._file || result._videoFile || result._downloadUrl || result._videoDownloadUrl) ? `
                 <div class="detail-section">
                     <h3>添付データ</h3>
                     <div class="attachment-section">
                         ${result._file ? `<button class="attachment-btn" onclick="viewResumePDF(${idx})"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></button>` : ''}
+                        ${!result._file && result._downloadUrl ? `<a class="attachment-btn" href="${result._downloadUrl}" target="_blank" style="text-decoration:none;color:#333;"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></a>` : ''}
                         ${result._videoFile ? `<button class="attachment-btn" onclick="viewVideo(${idx})"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result._videoFile.name}</div></div></button>` : ''}
+                        ${!result._videoFile && result._videoDownloadUrl ? `<a class="attachment-btn" href="${result._videoDownloadUrl}" target="_blank" style="text-decoration:none;color:#333;"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result.videoFilename || '動画'}</div></div></a>` : ''}
                     </div>
                 </div>
                 ` : ''}
@@ -1700,30 +1705,102 @@
             return bytes;
         }
 
-        function generateShareLink() {
+        async function generateShareLink() {
             if (!allResults || allResults.length === 0) return;
-            const shareData = {
-                results: allResults.map(r => {
-                    const clean = { ...r };
-                    delete clean._debug;
-                    delete clean._faceImage;
-                    delete clean._file;
-                    delete clean._videoFile;
-                    return clean;
-                }),
-                title: document.getElementById('jobSummaryText').textContent || '',
-                date: new Date().toLocaleDateString('ja-JP')
-            };
-            const json = JSON.stringify(shareData);
-            const compressed = pako.deflate(new TextEncoder().encode(json));
-            const encoded = toBase64Url(compressed);
-            const url = location.origin + location.pathname + '#share=' + encoded;
+            const shareBtn = document.getElementById('shareBtn');
+            shareBtn.disabled = true;
+            shareBtn.textContent = 'アップロード中...';
 
-            document.getElementById('shareUrlInput').value = url;
-            const copyBtn = document.getElementById('copyBtn');
-            copyBtn.textContent = 'コピー';
-            copyBtn.classList.remove('copied');
-            document.getElementById('shareModal').style.display = 'flex';
+            try {
+                // ファイルをVercel Blobにアップロード
+                const fileUrls = {};
+                let blobAvailable = true;
+
+                for (const result of allResults) {
+                    if (!result._file || result.error) continue;
+                    shareBtn.textContent = `アップロード中... ${result.filename}`;
+                    try {
+                        const base64 = await fileToBase64(result._file);
+                        const resp = await fetch('/api/share-upload', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ filename: result.filename, data: base64, contentType: 'application/pdf' })
+                        });
+                        const data = await resp.json();
+                        if (data.error === 'BLOB_NOT_CONFIGURED') { blobAvailable = false; break; }
+                        if (data.url) fileUrls[result.filename] = data.url;
+                    } catch (e) { console.warn('PDFアップロードスキップ:', e); }
+                }
+
+                // 動画ファイルもアップロード（7MB以下のみ）
+                if (blobAvailable) {
+                    for (const result of allResults) {
+                        if (!result._videoFile || result.error) continue;
+                        if (result._videoFile.size > 7 * 1024 * 1024) { console.log('動画が大きすぎるためスキップ:', result._videoFile.name); continue; }
+                        shareBtn.textContent = `アップロード中... ${result._videoFile.name}`;
+                        try {
+                            const base64 = await fileToBase64(result._videoFile);
+                            const resp = await fetch('/api/share-upload', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ filename: result._videoFile.name, data: base64, contentType: result._videoFile.type || 'video/mp4' })
+                            });
+                            const data = await resp.json();
+                            if (data.url) fileUrls[result.videoFilename || result._videoFile.name] = data.url;
+                        } catch (e) { console.warn('動画アップロードスキップ:', e); }
+                    }
+                }
+
+                // 結果データを整理
+                const cleanResults = allResults.map(r => {
+                    const clean = { ...r };
+                    delete clean._debug; delete clean._faceImage; delete clean._file; delete clean._videoFile;
+                    return clean;
+                });
+
+                let shareLink;
+
+                if (blobAvailable) {
+                    // Blob方式: 共有データJSONをBlobに保存
+                    shareBtn.textContent = '共有リンク生成中...';
+                    const resp = await fetch('/api/share-create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            results: cleanResults, fileUrls,
+                            title: document.getElementById('jobSummaryText').textContent || '',
+                            date: new Date().toLocaleDateString('ja-JP')
+                        })
+                    });
+                    const data = await resp.json();
+                    if (data.shareUrl) {
+                        shareLink = location.origin + location.pathname + '#s=' + encodeURIComponent(data.shareUrl);
+                    }
+                }
+
+                if (!shareLink) {
+                    // フォールバック: URLハッシュ圧縮方式（ファイルなし）
+                    const shareData = {
+                        results: cleanResults,
+                        title: document.getElementById('jobSummaryText').textContent || '',
+                        date: new Date().toLocaleDateString('ja-JP')
+                    };
+                    const json = JSON.stringify(shareData);
+                    const compressed = pako.deflate(new TextEncoder().encode(json));
+                    shareLink = location.origin + location.pathname + '#share=' + toBase64Url(compressed);
+                }
+
+                document.getElementById('shareUrlInput').value = shareLink;
+                const copyBtn = document.getElementById('copyBtn');
+                copyBtn.textContent = 'コピー';
+                copyBtn.classList.remove('copied');
+                document.getElementById('shareModal').style.display = 'flex';
+            } catch (err) {
+                alert('共有リンクの生成に失敗しました: ' + err.message);
+            } finally {
+                shareBtn.disabled = false;
+                shareBtn.textContent = '共有リンクを発行';
+            }
         }
 
         function copyShareLink() {
@@ -1736,30 +1813,43 @@
             });
         }
 
+        function enterSharedMode(shareData) {
+            allResults = shareData.results || [];
+            const fileUrls = shareData.fileUrls || {};
+            // ダウンロードURLを各結果に紐付け
+            allResults.forEach(r => {
+                if (fileUrls[r.filename]) r._downloadUrl = fileUrls[r.filename];
+                if (r.videoFilename && fileUrls[r.videoFilename]) r._videoDownloadUrl = fileUrls[r.videoFilename];
+            });
+            document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn, .progress-section').forEach(el => el.style.display = 'none');
+            document.getElementById('sharedBanner').style.display = 'block';
+            document.getElementById('sharedTitle').textContent = shareData.title ? '共有: ' + shareData.title : '共有された評価結果';
+            document.getElementById('sharedDate').textContent = shareData.date ? '評価日: ' + shareData.date : '';
+            document.getElementById('shareBtn').style.display = 'none';
+            displayResults(allResults);
+        }
+
         function loadSharedResults() {
             const hash = location.hash;
-            if (!hash.startsWith('#share=')) return;
-            try {
-                const encoded = hash.slice(7);
-                const compressed = fromBase64Url(encoded);
-                const json = new TextDecoder().decode(pako.inflate(compressed));
-                const shareData = JSON.parse(json);
-
-                allResults = shareData.results || [];
-
-                // 入力セクション非表示
-                document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn, .progress-section, .upload-section.video-upload').forEach(el => el.style.display = 'none');
-                // 共有バナー表示
-                const banner = document.getElementById('sharedBanner');
-                banner.style.display = 'block';
-                document.getElementById('sharedTitle').textContent = shareData.title ? '共有: ' + shareData.title : '共有された評価結果';
-                document.getElementById('sharedDate').textContent = shareData.date ? '評価日: ' + shareData.date : '';
-                // 共有ボタン非表示（閲覧者には不要）
-                document.getElementById('shareBtn').style.display = 'none';
-
-                displayResults(allResults);
-            } catch (e) {
-                console.error('共有データの読み込みに失敗:', e);
+            // Blob方式
+            if (hash.startsWith('#s=')) {
+                const shareUrl = decodeURIComponent(hash.slice(3));
+                fetch(shareUrl)
+                    .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+                    .then(shareData => enterSharedMode(shareData))
+                    .catch(e => console.error('共有データの読み込みに失敗:', e));
+                return;
+            }
+            // レガシー: URLハッシュ圧縮方式
+            if (hash.startsWith('#share=')) {
+                try {
+                    const encoded = hash.slice(7);
+                    const compressed = fromBase64Url(encoded);
+                    const json = new TextDecoder().decode(pako.inflate(compressed));
+                    enterSharedMode(JSON.parse(json));
+                } catch (e) {
+                    console.error('共有データの読み込みに失敗:', e);
+                }
             }
         }
 
