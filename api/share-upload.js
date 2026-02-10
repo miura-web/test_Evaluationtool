@@ -18,14 +18,17 @@ module.exports = async function handler(req, res) {
     }
 
     const buffer = Buffer.from(data, 'base64');
+    // Use a safe pathname (avoid encoding issues with Japanese filenames)
+    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    const blobRes = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(filename)}`, {
+    const blobRes = await fetch(`https://blob.vercel-storage.com/${safeName}`, {
       method: 'PUT',
       headers: {
         'authorization': `Bearer ${token}`,
         'x-api-version': '7',
         'x-content-type': contentType || 'application/octet-stream',
         'x-add-random-suffix': '1',
+        'Content-Type': 'application/octet-stream',
       },
       body: buffer,
     });

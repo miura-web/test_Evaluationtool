@@ -26,6 +26,7 @@ module.exports = async function handler(req, res) {
         'x-api-version': '7',
         'x-content-type': 'application/json',
         'x-add-random-suffix': '1',
+        'Content-Type': 'application/octet-stream',
       },
       body: shareData,
     });
@@ -39,5 +40,13 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ shareUrl: blob.url });
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+};
+
+module.exports.config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb'
+    }
   }
 };
