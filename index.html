@@ -273,6 +273,15 @@
         .shared-banner p { font-size: 0.85rem; color: #666; margin: 0; }
         .shared-banner a { color: #4a6cf7; text-decoration: none; font-weight: 600; }
         .shared-banner a:hover { text-decoration: underline; }
+        .attachment-section { display: flex; gap: 8px; margin-top: 16px; margin-bottom: 8px; }
+        .attachment-btn {
+            flex: 1; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa;
+            cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-size: 0.85rem; color: #333;
+        }
+        .attachment-btn:hover { background: #e8eaf6; border-color: #4a6cf7; }
+        .attachment-btn .att-icon { font-size: 1.3rem; }
+        .attachment-btn .att-label { font-weight: 600; }
+        .attachment-btn .att-sub { font-size: 0.75rem; color: #999; }
 
         .modal {
             display: none;
@@ -1303,6 +1312,8 @@
                             console.log('[DEBUG] API応答:', JSON.stringify(result._debug));
                         }
                         result.filename = file.name;
+                        result._file = file;
+                        if (associatedVideo) result._videoFile = associatedVideo.file;
                         allResults.push(result);
                     } catch (error) {
                         allResults.push({ filename: file.name, error: error.message });
@@ -1481,9 +1492,34 @@
                     <ul class="concerns">${concerns || '<li>なし</li>'}</ul>
                 </div>
                 ${videoEvalHTML}
+                ${result._file || result._videoFile ? `
+                <div class="detail-section">
+                    <h3>添付データ</h3>
+                    <div class="attachment-section">
+                        ${result._file ? `<button class="attachment-btn" onclick="viewResumePDF(${idx})"><span class="att-icon">&#128196;</span><div><div class="att-label">履歴書PDF</div><div class="att-sub">${result.filename}</div></div></button>` : ''}
+                        ${result._videoFile ? `<button class="attachment-btn" onclick="viewVideo(${idx})"><span class="att-icon">&#127909;</span><div><div class="att-label">面接動画</div><div class="att-sub">${result._videoFile.name}</div></div></button>` : ''}
+                    </div>
+                </div>
+                ` : ''}
                 <button class="pdf-download-modal-btn" onclick="generatePDFReport(${idx}); return false;">PDFレポートをダウンロード</button>
             `;
             modal.style.display = 'flex';
+        }
+
+        function viewResumePDF(idx) {
+            const result = allResults.sort((a, b) => (b.score || 0) - (a.score || 0))[idx];
+            if (!result || !result._file) return;
+            const url = URL.createObjectURL(result._file);
+            window.open(url, '_blank');
+        }
+
+        function viewVideo(idx) {
+            const result = allResults.sort((a, b) => (b.score || 0) - (a.score || 0))[idx];
+            if (!result || !result._videoFile) return;
+            const url = URL.createObjectURL(result._videoFile);
+            // 動画プレーヤーモーダル
+            const vw = window.open('', '_blank');
+            vw.document.write(`<!DOCTYPE html><html><head><title>${result._videoFile.name}</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}video{max-width:100%;max-height:100%;}</style></head><body><video src="${url}" controls autoplay></video></body></html>`);
         }
 
         async function generatePDFReport(idx) {
@@ -1671,6 +1707,8 @@
                     const clean = { ...r };
                     delete clean._debug;
                     delete clean._faceImage;
+                    delete clean._file;
+                    delete clean._videoFile;
                     return clean;
                 }),
                 title: document.getElementById('jobSummaryText').textContent || '',
