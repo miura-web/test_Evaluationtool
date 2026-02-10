@@ -1175,7 +1175,12 @@
 
                 video.onloadedmetadata = () => {
                     try {
-                        const duration = Math.min(video.duration, maxDurationSec);
+                        // 3分後から切り取り。動画が短い場合は先頭から
+                        const startOffset = 180;
+                        const startTime = video.duration > startOffset + maxDurationSec ? startOffset : Math.max(0, video.duration - maxDurationSec);
+                        const endTime = Math.min(startTime + maxDurationSec, video.duration);
+                        console.log('[Preview] duration=' + video.duration + ' start=' + startTime + ' end=' + endTime);
+
                         const scale = Math.min(1, 480 / Math.max(video.videoHeight, 1));
                         const width = Math.round(video.videoWidth * scale) || 640;
                         const height = Math.round(video.videoHeight * scale) || 480;
@@ -1218,22 +1223,26 @@
                             resolve(blob);
                         };
 
-                        video.currentTime = 0;
-                        video.play().then(() => {
-                            recorder.start(1000);
-                            const drawFrame = () => {
-                                if (video.currentTime >= duration || video.ended) {
+                        // startTimeにシークしてから録画開始
+                        video.currentTime = startTime;
+                        video.onseeked = () => {
+                            video.onseeked = null;
+                            video.play().then(() => {
+                                recorder.start(1000);
+                                const drawFrame = () => {
+                                    if (video.currentTime >= endTime || video.ended) {
+                                        if (recorder.state === 'recording') recorder.stop();
+                                        return;
+                                    }
+                                    ctx.drawImage(video, 0, 0, width, height);
+                                    requestAnimationFrame(drawFrame);
+                                };
+                                drawFrame();
+                                setTimeout(() => {
                                     if (recorder.state === 'recording') recorder.stop();
-                                    return;
-                                }
-                                ctx.drawImage(video, 0, 0, width, height);
-                                requestAnimationFrame(drawFrame);
-                            };
-                            drawFrame();
-                            setTimeout(() => {
-                                if (recorder.state === 'recording') recorder.stop();
-                            }, duration * 1000 + 1000);
-                        }).catch(err => { cleanup(); reject(err); });
+                                }, (endTime - startTime) * 1000 + 1000);
+                            }).catch(err => { cleanup(); reject(err); });
+                        };
                     } catch(e) { cleanup(); reject(e); }
                 };
 
