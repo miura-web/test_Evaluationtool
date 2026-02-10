@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -172,7 +173,7 @@
             box-shadow: 0 2px 12px rgba(0,0,0,0.08);
             display: none;
         }
-        .results-section h2 { font-size: 1.5rem; margin-bottom: 24px; color: #1a1a2e; }
+        .results-section h2 { font-size: 1.5rem; margin-bottom: 0; color: #1a1a2e; }
         .results-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 30px; }
         .summary-card { padding: 20px; border-radius: 8px; text-align: center; }
         .summary-card .count { display: block; font-size: 2rem; font-weight: 700; }
@@ -242,6 +243,36 @@
         .pdf-download-modal-btn:hover { background: #00695c; }
         .pdf-download-modal-btn:disabled { background: #aaa; cursor: wait; }
         .error-row td { background: #fff3f3; color: #c62828; }
+
+        .share-btn {
+            padding: 8px 16px; background: #4a6cf7; color: white; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: background 0.3s;
+        }
+        .share-btn:hover { background: #3a5ce5; }
+        .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .results-header h2 { margin-bottom: 0; }
+        .share-url-box {
+            display: flex; gap: 8px; margin-top: 16px;
+        }
+        .share-url-input {
+            flex: 1; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px;
+            font-size: 0.8rem; font-family: monospace; background: #f8f9fa; color: #333;
+            word-break: break-all;
+        }
+        .copy-btn {
+            padding: 10px 20px; background: #4a6cf7; color: white; border: none; border-radius: 6px;
+            cursor: pointer; font-weight: 600; font-size: 0.85rem; white-space: nowrap; transition: background 0.3s;
+        }
+        .copy-btn:hover { background: #3a5ce5; }
+        .copy-btn.copied { background: #2e7d32; }
+        .shared-banner {
+            padding: 16px 20px; background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+            border-radius: 10px; margin-bottom: 24px; display: none;
+        }
+        .shared-banner h3 { font-size: 1rem; color: #1a1a2e; margin-bottom: 4px; }
+        .shared-banner p { font-size: 0.85rem; color: #666; margin: 0; }
+        .shared-banner a { color: #4a6cf7; text-decoration: none; font-weight: 600; }
+        .shared-banner a:hover { text-decoration: underline; }
 
         .modal {
             display: none;
@@ -617,7 +648,14 @@
         </div>
 
         <div id="resultsSection" class="results-section">
-            <h2>評価結果</h2>
+            <div id="sharedBanner" class="shared-banner">
+                <h3 id="sharedTitle">共有された評価結果</h3>
+                <p><span id="sharedDate"></span> | <a href="javascript:void(0)" onclick="exitSharedMode()">新しく評価する</a></p>
+            </div>
+            <div class="results-header">
+                <h2>評価結果</h2>
+                <button class="share-btn" id="shareBtn" onclick="generateShareLink()">共有リンクを発行</button>
+            </div>
             <div id="jobSummary" class="job-summary">
                 <h3>募集要項</h3>
                 <p id="jobSummaryText">-</p>
@@ -661,6 +699,19 @@
             <div class="modal-content">
                 <span class="close-btn">&times;</span>
                 <div id="modalBody"></div>
+            </div>
+        </div>
+
+        <div id="shareModal" class="modal">
+            <div class="modal-content" style="max-width:520px;">
+                <span class="close-btn" onclick="document.getElementById('shareModal').style.display='none'">&times;</span>
+                <h2 style="font-size:1.2rem;margin-bottom:8px;">共有リンク</h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:12px;">このリンクを共有すると、評価結果を閲覧できます。</p>
+                <div class="share-url-box">
+                    <input type="text" id="shareUrlInput" class="share-url-input" readonly />
+                    <button class="copy-btn" id="copyBtn" onclick="copyShareLink()">コピー</button>
+                </div>
+                <p style="font-size:0.75rem;color:#999;margin-top:10px;">※ データはURL内に圧縮して格納されます。別途サーバーには保存されません。</p>
             </div>
         </div>
 
@@ -1597,6 +1648,94 @@
 
         renderPresetCriteria();
         renderCustomCriteria();
+
+        // === 共有リンク機能 ===
+        function toBase64Url(uint8) {
+            let binary = '';
+            for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function fromBase64Url(str) {
+            str = str.replace(/-/g, '+').replace(/_/g, '/');
+            while (str.length % 4) str += '=';
+            const binary = atob(str);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            return bytes;
+        }
+
+        function generateShareLink() {
+            if (!allResults || allResults.length === 0) return;
+            const shareData = {
+                results: allResults.map(r => {
+                    const clean = { ...r };
+                    delete clean._debug;
+                    delete clean._faceImage;
+                    return clean;
+                }),
+                title: document.getElementById('jobSummaryText').textContent || '',
+                date: new Date().toLocaleDateString('ja-JP')
+            };
+            const json = JSON.stringify(shareData);
+            const compressed = pako.deflate(new TextEncoder().encode(json));
+            const encoded = toBase64Url(compressed);
+            const url = location.origin + location.pathname + '#share=' + encoded;
+
+            document.getElementById('shareUrlInput').value = url;
+            const copyBtn = document.getElementById('copyBtn');
+            copyBtn.textContent = 'コピー';
+            copyBtn.classList.remove('copied');
+            document.getElementById('shareModal').style.display = 'flex';
+        }
+
+        function copyShareLink() {
+            const input = document.getElementById('shareUrlInput');
+            navigator.clipboard.writeText(input.value).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.textContent = 'コピー済み';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = 'コピー'; btn.classList.remove('copied'); }, 2000);
+            });
+        }
+
+        function loadSharedResults() {
+            const hash = location.hash;
+            if (!hash.startsWith('#share=')) return;
+            try {
+                const encoded = hash.slice(7);
+                const compressed = fromBase64Url(encoded);
+                const json = new TextDecoder().decode(pako.inflate(compressed));
+                const shareData = JSON.parse(json);
+
+                allResults = shareData.results || [];
+
+                // 入力セクション非表示
+                document.querySelectorAll('.upload-section, .criteria-section, .evaluate-btn, .progress-section, .upload-section.video-upload').forEach(el => el.style.display = 'none');
+                // 共有バナー表示
+                const banner = document.getElementById('sharedBanner');
+                banner.style.display = 'block';
+                document.getElementById('sharedTitle').textContent = shareData.title ? '共有: ' + shareData.title : '共有された評価結果';
+                document.getElementById('sharedDate').textContent = shareData.date ? '評価日: ' + shareData.date : '';
+                // 共有ボタン非表示（閲覧者には不要）
+                document.getElementById('shareBtn').style.display = 'none';
+
+                displayResults(allResults);
+            } catch (e) {
+                console.error('共有データの読み込みに失敗:', e);
+            }
+        }
+
+        function exitSharedMode() {
+            history.replaceState(null, '', location.pathname);
+            location.reload();
+        }
+
+        // 共有モーダル閉じる
+        const shareModal = document.getElementById('shareModal');
+        shareModal.addEventListener('click', e => { if (e.target === shareModal) shareModal.style.display = 'none'; });
+
+        // ページ読み込み時に共有データチェック
+        loadSharedResults();
     </script>
 
     <script type="module">
